@@ -52,44 +52,53 @@ void parse_jobs_file(int fd, const char *base_name) {
         }
 
         case CMD_SHOW: {
-            unsigned int event_id;
-            if (parse_show(fd, &event_id) != 0) {
-                fprintf(stderr, "Invalid command. See HELP for usage\n");
-            }
+                      // Construct the output file path
+          char out_file_path[PATH_MAX];
+          snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", JOBS_DIR, base_name);
 
-            // Construct the output file path
-            char out_file_path[PATH_MAX];
-            snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", JOBS_DIR, base_name);
+          // Open the output file for writing
+          FILE *out_file = fdopen(open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0666), "w");
+          if (out_file == NULL) {
+              perror("Error opening output file");
+              return;
+          }
 
-            ems_show(event_id);
+          // Save the current stdout
+          int saved_stdout = dup(fileno(stdout));
+          if (saved_stdout == -1) {
+              perror("Error saving stdout");
+              fclose(out_file);
+              return;
+          }
 
-            // Open the output file for writing
-            int out_fd = open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC);
-            if (out_fd == -1) {
-                perror("Error opening output file");
-                return;
-            }
+          // Redirect stdout to the output file
+          if (dup2(fileno(out_file), STDOUT_FILENO) == -1) {
+              perror("Error redirecting stdout to output file");
+              fclose(out_file);
+              dup2(saved_stdout, STDOUT_FILENO);  // Restore stdout
+              close(saved_stdout);
+              return;
+          }
 
-            // Save the current stdout
-            int saved_stdout = dup(STDOUT_FILENO);
+          unsigned int event_id;
+          if (parse_show(fd, &event_id) != 0) {
+              fprintf(stderr, "Invalid command. See HELP for usage\n");
+          } else {
+              ems_show(event_id);
+          }
 
-            // Redirect stdout to the output file
-            if (dup2(out_fd, STDOUT_FILENO) == -1) {
-                perror("Error redirecting stdout to output file");
-                close(out_fd);
-                return;
-            }
+          // Restore stdout
+          if (dup2(saved_stdout, STDOUT_FILENO) == -1) {
+              perror("Error restoring stdout");
+          }
 
-            // Restore stdout
-            if (dup2(saved_stdout, STDOUT_FILENO) == -1) {
-                perror("Error restoring stdout");
-            }
+          // Close file descriptor for the output file (stdout is still redirected)
+          fclose(out_file);
 
-            // Close file descriptors
-            close(out_fd);
-            close(saved_stdout);
-          
-            return;
+          // Close the saved file descriptor for stdout
+          close(saved_stdout);
+
+          return;
         }
 
         case CMD_LIST_EVENTS:
