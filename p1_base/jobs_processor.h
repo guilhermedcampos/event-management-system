@@ -1,3 +1,4 @@
+/*
 #ifndef JOBS_PROCESSOR_H
 #define JOBS_PROCESSOR_H
 
@@ -9,3 +10,4 @@ int endsWith(const char *str, const char *suffix);
 int process_jobs_directory();
 
 #endif
+*/
