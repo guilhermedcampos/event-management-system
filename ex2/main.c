@@ -8,12 +8,9 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 
-
 #include "constants.h"
 #include "operations.h"
 #include "parser.h"
-#include "jobs_processor.h" 
-
 
 #define JOBS_DIR "jobs"  // name of the directory
 
