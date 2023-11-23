@@ -11,7 +11,6 @@
 #include "parser.h"
 
 #define JOBS_DIR "jobs"
-#define MAX_EVENTS 100
 
 // Checks if a file is a extension of .jobs
 int endsWith(const char *str, const char *suffix) {
@@ -25,11 +24,26 @@ int endsWith(const char *str, const char *suffix) {
     return strcmp(str + (str_len - suffix_len), suffix) == 0;
 }
 
+void addToArray(unsigned int** createdEvents, int* size, unsigned int eventId) {
+   *size += 1;
 
+   *createdEvents = (unsigned int*)realloc(*createdEvents, (size_t)*size * sizeof(int));
+   if (*createdEvents == NULL) {
+      fprintf(stdin, "Memory reallocation failed");
+      exit(EXIT_FAILURE);
+   }
+
+   
+
+   (*createdEvents)[*size - 1] = eventId;
+}
 
 // Parses the .jobs file given, reading its content
 void parse_jobs_file(int fd, const char *base_name) {
   int end_of_cycle = 0;
+
+  int size = 0;
+  unsigned int* created_events = NULL;
 
   while(!end_of_cycle) {
     enum Command cmd = get_next(fd);
@@ -39,6 +53,7 @@ void parse_jobs_file(int fd, const char *base_name) {
             size_t num_rows, num_cols;
             if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
               ems_create(event_id, num_rows, num_cols);
+              addToArray(&created_events, &size, event_id);
             }
             break;
         }
@@ -93,11 +108,9 @@ void parse_jobs_file(int fd, const char *base_name) {
         case CMD_EMPTY:
           break;
 
-          case EOC: {
-              int num_events = 0;
-              unsigned int* event_ids = ems_list_events(&num_events);
+        case EOC: {
 
-              if (event_ids == NULL) {
+              if (created_events == NULL) {
                   perror("No events to display.");
                 break;
               }
@@ -110,7 +123,7 @@ void parse_jobs_file(int fd, const char *base_name) {
               int out_fd = open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
               if (out_fd == -1) {
                   perror("Error opening output file");
-                  free(event_ids);
+                  free(created_events);
                   break;
               }
 
@@ -121,13 +134,14 @@ void parse_jobs_file(int fd, const char *base_name) {
               if (dup2(out_fd, STDOUT_FILENO) == -1) {
                   perror("Error redirecting stdout to output file");
                   close(out_fd);
-                  free(event_ids);
+                  free(created_events);
                   break;
               }
 
-              for (int i = 0; i < num_events; i++) {
-                printf("Event: %u\n", event_ids[i]);
-                ems_show(event_ids[i]);
+              for (int i = 0; i < size; i++) {
+                printf("Evend id: %u\n", created_events[i]);
+                ems_show(created_events[i]);
+                printf("\n");
               }
 
 
@@ -143,8 +157,9 @@ void parse_jobs_file(int fd, const char *base_name) {
               fflush(stdout);  // Flush after processing each file
 
               // Free the memory allocated for event_ids
-              free(event_ids);
+              free(created_events);
               end_of_cycle = 1;
+              created_events = NULL;
               break;
           }
         default:
@@ -219,6 +234,6 @@ int main(int argc, char *argv[]) {
 
   process_jobs_directory();
 
- 
+  ems_terminate();
   return 0;
 }
