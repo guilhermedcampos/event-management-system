@@ -33,8 +33,6 @@ void addToArray(unsigned int** createdEvents, int* size, unsigned int eventId) {
       exit(EXIT_FAILURE);
    }
 
-   
-
    (*createdEvents)[*size - 1] = eventId;
 }
 

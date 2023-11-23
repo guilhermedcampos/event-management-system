@@ -28,11 +28,24 @@ int endsWith(const char *str, const char *suffix) {
     return strcmp(str + (str_len - suffix_len), suffix) == 0;
 }
 
+void addToArray(unsigned int** createdEvents, int* size, unsigned int eventId) {
+   *size += 1;
+
+   *createdEvents = (unsigned int*)realloc(*createdEvents, (size_t)*size * sizeof(int));
+   if (*createdEvents == NULL) {
+      fprintf(stdin, "Memory reallocation failed");
+      exit(EXIT_FAILURE);
+   }
+
+   (*createdEvents)[*size - 1] = eventId;
+}
+
 // Parses the .jobs file given, reading its content
 void parse_jobs_file(int fd, const char *base_name) {
   int end_of_cycle = 0;
-  int num_events = 0;
-   unsigned int* event_ids = NULL;
+
+  int size = 0;
+  unsigned int* created_events = NULL;
 
   while(!end_of_cycle) {
     enum Command cmd = get_next(fd);
@@ -42,6 +55,7 @@ void parse_jobs_file(int fd, const char *base_name) {
             size_t num_rows, num_cols;
             if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
               ems_create(event_id, num_rows, num_cols);
+              addToArray(&created_events, &size, event_id);
             }
             break;
         }
@@ -60,12 +74,12 @@ void parse_jobs_file(int fd, const char *base_name) {
             if (parse_show(fd, &event_id) != 0) {
                 fprintf(stderr, "Invalid command. See HELP for usage\n");
             }
-            //ems_show(event_id);
+            ems_show(event_id);
             break;
         }
 
         case CMD_LIST_EVENTS:
-          if (ems_list_events(&num_events)) {
+          if (ems_list_events()) {
             fprintf(stderr, "Failed to list events\n");
           }
 
@@ -96,62 +110,59 @@ void parse_jobs_file(int fd, const char *base_name) {
         case CMD_EMPTY:
           break;
 
-          case EOC: {
-              event_ids = ems_list_events(&num_events);
+        case EOC: {
+          if (created_events == NULL) {
+              perror("No events to display.");
+            break;
+          }
 
-              printf("%d", num_events);
+          // Construct the output file path
+          char out_file_path[PATH_MAX];
+          snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", JOBS_DIR, base_name);
 
-              if (event_ids == NULL) {
-                  perror("No events to display.");
-                break;
-              }
-
-              // Construct the output file path
-              char out_file_path[PATH_MAX];
-              snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", JOBS_DIR, base_name);
-
-              // Open the output file for writing
-              int out_fd = open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-              if (out_fd == -1) {
-                  perror("Error opening output file");
-                  free(event_ids);
-                  break;
-              }
-
-              // Save the current stdout
-              int saved_stdout = dup(STDOUT_FILENO);
-
-              // Redirect stdout to the output file
-              if (dup2(out_fd, STDOUT_FILENO) == -1) {
-                  perror("Error redirecting stdout to output file");
-                  close(out_fd);
-                  free(event_ids);
-                  break;
-              }
-
-              for (int i = 0; i < num_events; i++) {
-                printf("Event: %u\n", event_ids[i]);
-                ems_show(event_ids[i]);
-              }
-
-
-              // Restore stdout
-              if (dup2(saved_stdout, STDOUT_FILENO) == -1) {
-                  perror("Error restoring stdout");
-              }
-
-              // Close file descriptors
-              close(out_fd);
-              close(saved_stdout);
-
-              fflush(stdout);  // Flush after processing each file
-
-              // Free the memory allocated for event_ids
-              free(event_ids);
-              end_of_cycle = 1;
-              event_ids = NULL;
+          // Open the output file for writing
+          int out_fd = open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+          if (out_fd == -1) {
+              perror("Error opening output file");
+              free(created_events);
               break;
           }
+
+          // Save the current stdout
+          int saved_stdout = dup(STDOUT_FILENO);
+
+          // Redirect stdout to the output file
+          if (dup2(out_fd, STDOUT_FILENO) == -1) {
+              perror("Error redirecting stdout to output file");
+              close(out_fd);
+              free(created_events);
+              break;
+          }
+
+          for (int i = 0; i < size; i++) {
+            printf("Event: %u\n", created_events[i]);
+            ems_show(created_events[i]);
+            printf("\n");
+          }
+
+
+          // Restore stdout
+          if (dup2(saved_stdout, STDOUT_FILENO) == -1) {
+              perror("Error restoring stdout");
+          }
+
+          // Close file descriptors
+          close(out_fd);
+          close(saved_stdout);
+
+          fflush(stdout);  // Flush after processing each file
+
+          // Free the memory allocated for event_ids
+          free(created_events);
+          end_of_cycle = 1;
+          created_events = NULL;
+          break;
+        }
         default:
 
           break;

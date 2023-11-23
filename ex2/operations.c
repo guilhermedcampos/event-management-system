@@ -184,61 +184,25 @@ int ems_show(unsigned int event_id) {
 
   return 0;
 }
+int ems_list_events() {
+  if (event_list == NULL) {
+    fprintf(stderr, "EMS state must be initialized\n");
+    return 1;
+  }
 
-unsigned int* ems_list_events(int* num_events) {
-    if (event_list == NULL) {
-        fprintf(stderr, "EMS state must be initialized\n");
-        return NULL;
-    }
+  if (event_list->head == NULL) {
+    printf("No events\n");
+    return 0;
+  }
 
-    *num_events = 0;
+  struct ListNode* current = event_list->head;
+  while (current != NULL) {
+    printf("Event: ");
+    printf("%u\n", (current->event)->id);
+    current = current->next;
+  }
 
-    if (event_list->head == NULL) {
-        printf("No events\n");
-        return NULL;
-    }
-
-    // First loop: Count the number of unique events
-    struct ListNode* current = event_list->head;
-    while (current != NULL) {
-        (*num_events)++;
-        current = current->next;
-    }
-
-    // Check if there are no unique events
-    if (*num_events == 0) {
-        printf("No events\n");
-        return NULL;
-    }
-
-    // Allocate memory for the array of unique event IDs
-    unsigned int* event_ids = (unsigned int*)malloc((size_t)*num_events * sizeof(unsigned int));
-    if (event_ids == NULL) {
-        perror("Error allocating memory for event IDs");
-        return NULL;
-    }
-
-    // Second loop: Fill the array with unique event IDs
-    int i = 0;
-    current = event_list->head;
-    while (current != NULL) {
-        // Check if the event ID is not already in the array
-        int isDuplicate = 0;
-        for (int j = 0; j < i; j++) {
-            if (event_ids[j] == (current->event)->id) {
-                isDuplicate = 1;
-                break;
-            }
-        }
-
-        if (!isDuplicate) {
-            event_ids[i++] = (current->event)->id;
-        }
-
-        current = current->next;
-    }
-
-    return event_ids;
+  return 0;
 }
 
 
