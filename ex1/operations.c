@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-
+#include <unistd.h>
 #include "eventlist.h"
+#include <string.h>
 
 static struct EventList* event_list = NULL;
 static unsigned int state_access_delay_ms = 0;
@@ -156,50 +157,60 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
   return 0;
 }
 
-int ems_show(unsigned int event_id) {
+int ems_show(unsigned int event_id, int fd) {
   if (event_list == NULL) {
-    fprintf(stderr, "EMS state must be initialized\n");
+    write(fd, "EMS state must be initialized\n", strlen("EMS state must be initialized\n"));
     return 1;
   }
 
   struct Event* event = get_event_with_delay(event_id);
 
   if (event == NULL) {
-    fprintf(stderr, "Event not found\n");
+    write(fd, "Event not found\n", strlen("Event not found\n"));
     return 1;
   }
 
   for (size_t i = 1; i <= event->rows; i++) {
     for (size_t j = 1; j <= event->cols; j++) {
       unsigned int* seat = get_seat_with_delay(event, seat_index(event, i, j));
-      printf("%u", *seat);
 
-      if (j < event->cols) {
-        printf(" ");
+      // Use write to output binary data
+      ssize_t bytes_written = write(fd, seat, sizeof(unsigned int));
+      
+      if (bytes_written < 0){
+         return -1;
       }
+
+      // Optionally, you can add a separator if needed
+      // char separator = ' ';
+      // write(fd, &separator, 1);
     }
 
-    printf("\n");
+    // Add a newline after each row
+    char newline = '\n';
+    write(fd, &newline, 1);
   }
 
   return 0;
 }
 
-int ems_list_events() {
+
+int ems_list_events(int fd) {
   if (event_list == NULL) {
-    fprintf(stderr, "EMS state must be initialized\n");
+    write(fd, "EMS state must be initialized\n", strlen("EMS state must be initialized\n"));
     return 1;
   }
 
   if (event_list->head == NULL) {
-    printf("No events\n");
+    write(fd, "No events\n", strlen("No events\n"));
     return 0;
   }
 
   struct ListNode* current = event_list->head;
   while (current != NULL) {
-    printf("Event: ");
-    printf("%u\n", (current->event)->id);
+    char buffer[64];  // Adjust the buffer size as needed
+    int length = snprintf(buffer, sizeof(buffer), "Event: %u\n", (current->event)->id);
+    write(fd, buffer, (size_t)length);
     current = current->next;
   }
 

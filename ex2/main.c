@@ -79,7 +79,6 @@ void parse_jobs_file(int fd, const char *base_name) {
           if (ems_list_events()) {
             fprintf(stderr, "Failed to list events\n");
           }
-
           break;
 
         case CMD_WAIT:
@@ -213,11 +212,11 @@ void process_jobs_directory(int max_proc) {
                 while (active_processes >= max_proc) {
                     int status;
                     pid_t child_pid = waitpid(-1, &status, WNOHANG);
+                    // printar status
                     if (child_pid > 0) {
                         active_processes--;
                     }
                 }
-                close(fd);
             } else {
                 // Fork failed
                 perror("Fork failed");
@@ -229,6 +228,7 @@ void process_jobs_directory(int max_proc) {
     while (active_processes > 0) {
         int status;
         pid_t child_pid = waitpid(-1, &status, 0);
+        // printar status
         if (child_pid > 0) {
             active_processes--;
         }

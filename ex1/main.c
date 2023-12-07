@@ -10,8 +10,6 @@
 #include "operations.h"
 #include "parser.h"
 
-#define JOBS_DIR "jobs"
-
 // Checks if a file is a extension of .jobs
 int endsWith(const char *str, const char *suffix) {
     size_t str_len = strlen(str);
@@ -24,72 +22,68 @@ int endsWith(const char *str, const char *suffix) {
     return strcmp(str + (str_len - suffix_len), suffix) == 0;
 }
 
-void addToArray(unsigned int** createdEvents, int* size, unsigned int eventId) {
-   *size += 1;
-
-   *createdEvents = (unsigned int*)realloc(*createdEvents, (size_t)*size * sizeof(int));
-   if (*createdEvents == NULL) {
-      fprintf(stdin, "Memory reallocation failed");
-      exit(EXIT_FAILURE);
-   }
-
-   (*createdEvents)[*size - 1] = eventId;
-}
 
 // Parses the .jobs file given, reading its content
-void parse_jobs_file(int fd, const char *base_name) {
-  int end_of_cycle = 0;
+void parse_jobs_file(int fd, const char *base_name, char argv[]) {
+  char out_file_path[PATH_MAX];
 
-  int size = 0;
-  unsigned int* created_events = NULL;
+  // Construct the output file path
+  snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", argv, base_name);
 
-  while(!end_of_cycle) {
+  // Open the output file for writing
+  int out_fd = open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  if (out_fd == -1) {
+      perror("Error opening output file");
+      return;
+  }
+
+  int close_out_fd = 1;  // Flag to track if out_fd needs to be closed
+
+  while (1) {
     enum Command cmd = get_next(fd);
     switch (cmd) {
-        case CMD_CREATE: {
-            unsigned int event_id;
-            size_t num_rows, num_cols;
-            if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
-              ems_create(event_id, num_rows, num_cols);
-              addToArray(&created_events, &size, event_id);
-            }
-            break;
+      case CMD_CREATE: {
+        unsigned int event_id;
+        size_t num_rows, num_cols;
+        if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
+          ems_create(event_id, num_rows, num_cols);
         }
-        case CMD_RESERVE: {
-            unsigned int event_id;
-            size_t xs[MAX_RESERVATION_SIZE], ys[MAX_RESERVATION_SIZE];
-            size_t num_coords = parse_reserve(fd, MAX_RESERVATION_SIZE, &event_id, xs, ys);
-            if (num_coords > 0) {
-                ems_reserve(event_id, num_coords, xs, ys);
-            }
-            break;
+        break;
+      }
+      case CMD_RESERVE: {
+        unsigned int event_id;
+        size_t xs[MAX_RESERVATION_SIZE], ys[MAX_RESERVATION_SIZE];
+        size_t num_coords = parse_reserve(fd, MAX_RESERVATION_SIZE, &event_id, xs, ys);
+        if (num_coords > 0) {
+          ems_reserve(event_id, num_coords, xs, ys);
         }
+        break;
+      }
 
-        case CMD_SHOW: {
-            unsigned int event_id;
-            if (parse_show(fd, &event_id) != 0) {
-                fprintf(stderr, "Invalid command. See HELP for usage\n");
-            }
-            ems_show(event_id);
-            break;
-        }
-
-        case CMD_LIST_EVENTS:
-          if (ems_list_events()) {
-            fprintf(stderr, "Failed to list events\n");
-          }
-
-          break;
-
-        case CMD_WAIT:
-          break;
-
-        case CMD_INVALID:
+      case CMD_SHOW: {
+        unsigned int event_id;
+        if (parse_show(fd, &event_id) != 0) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
-          break;
+        }
+        ems_show(event_id, out_fd);
+        break;
+      }
 
-        case CMD_HELP:
-          printf(
+      case CMD_LIST_EVENTS:
+        if (ems_list_events(out_fd)) {
+          fprintf(stderr, "Failed to list events\n");
+        }
+        break;
+
+      case CMD_WAIT:
+        break;
+
+      case CMD_INVALID:
+        fprintf(stderr, "Invalid command. See HELP for usage\n");
+        break;
+
+      case CMD_HELP:
+        printf(
             "Available commands:\n"
             "  CREATE <event_id> <num_rows> <num_columns>\n"
             "  RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
@@ -98,79 +92,39 @@ void parse_jobs_file(int fd, const char *base_name) {
             "  WAIT <delay_ms> [thread_id]\n"  // thread_id is not implemented
             "  BARRIER\n"                      // Not implemented
             "  HELP\n");
-          break;
+        break;
 
-        case CMD_BARRIER:  // Not implemented
-          break;
+      case CMD_BARRIER:  // Not implemented
+        break;
 
-        case CMD_EMPTY:
-          break;
+      case CMD_EMPTY:
+        break;
 
-        case EOC: {
+      case EOC:
+        close_out_fd = 0;  // Flag to track if out_fd needs to be closed
+        break;
 
-              if (created_events == NULL) {
-                  perror("No events to display.");
-                break;
-              }
+      default:
+        break;
+    }
 
-              // Construct the output file path
-              char out_file_path[PATH_MAX];
-              snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", JOBS_DIR, base_name);
-
-              // Open the output file for writing
-              int out_fd = open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-              if (out_fd == -1) {
-                  perror("Error opening output file");
-                  free(created_events);
-                  break;
-              }
-
-              // Save the current stdout
-              int saved_stdout = dup(STDOUT_FILENO);
-
-              // Redirect stdout to the output file
-              if (dup2(out_fd, STDOUT_FILENO) == -1) {
-                  perror("Error redirecting stdout to output file");
-                  close(out_fd);
-                  free(created_events);
-                  break;
-              }
-
-              for (int i = 0; i < size; i++) {
-                printf("Evend id: %u\n", created_events[i]);
-                ems_show(created_events[i]);
-                printf("\n");
-              }
-
-
-              // Restore stdout
-              if (dup2(saved_stdout, STDOUT_FILENO) == -1) {
-                  perror("Error restoring stdout");
-              }
-
-              // Close file descriptors
-              close(out_fd);
-              close(saved_stdout);
-
-              fflush(stdout);  // Flush after processing each file
-
-              // Free the memory allocated for event_ids
-              free(created_events);
-              end_of_cycle = 1;
-              created_events = NULL;
-              break;
-          }
-        default:
-
-          break;
-      }
+    if (!close_out_fd) {
+      break;  // Break out of the loop when EOC is encountered
     }
   }
 
+  // Close file descriptors outside the loop
+  close(fd);  // Close input file descriptor
+  close(out_fd);  // Close output file descriptor
+  fflush(stdout);  // Flush after processing each file
+}
+
+
+
 
 // Opens the jobs directory containing .jobs and .out
-void process_jobs_directory() {
-    DIR *dir = opendir(JOBS_DIR);
+void process_directory(char argv[]) {
+    DIR *dir = opendir(argv);
 
     if (dir == NULL) {
         perror("Error opening directory");
@@ -187,7 +141,7 @@ void process_jobs_directory() {
 
             // Construct the path to the job file
             char file_path[PATH_MAX];
-            snprintf(file_path, sizeof(file_path), "%s/%s", JOBS_DIR, entry->d_name);
+            snprintf(file_path, sizeof(file_path), "%s/%s", argv, entry->d_name);
 
             // Construct the file name
             char base_name[PATH_MAX];
@@ -201,7 +155,7 @@ void process_jobs_directory() {
             }
 
             // Parse the .jobs file
-            parse_jobs_file(fd, base_name);
+            parse_jobs_file(fd, base_name, argv);
             close(fd);
         }
     }
@@ -213,9 +167,19 @@ void process_jobs_directory() {
 int main(int argc, char *argv[]) {
   unsigned int state_access_delay_ms = STATE_ACCESS_DELAY_MS;
 
-  if (argc > 1) {
+  // Check if the number of arguments is correct
+  if (argc != 2 && argc != 3) {
+    fprintf(stderr, "Usage: %s <directory> [number]\n", argv[0]);
+    return 1;
+  }
+
+  // Set the directory
+  char *directory = argv[1];
+
+  // Check if the optional number argument is provided
+  if (argc == 3) {
     char *endptr;
-    unsigned long int delay = strtoul(argv[1], &endptr, 10);
+    unsigned long int delay = strtoul(argv[2], &endptr, 10);
 
     if (*endptr != '\0' || delay > UINT_MAX) {
       fprintf(stderr, "Invalid delay value or value too large\n");
@@ -230,8 +194,10 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  process_jobs_directory();
+  // Process the directory
+  process_directory(directory);
 
   ems_terminate();
   return 0;
 }
+
