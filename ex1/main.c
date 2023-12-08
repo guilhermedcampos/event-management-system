@@ -5,6 +5,8 @@
 #include <string.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include "constants.h"
 #include "operations.h"
@@ -31,7 +33,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
   snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", argv, base_name);
 
   // Open the output file for writing
-  int out_fd = open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  int out_fd = open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC);
   if (out_fd == -1) {
       perror("Error opening output file");
       return;

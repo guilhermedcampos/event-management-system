@@ -4,6 +4,10 @@
 #include <unistd.h>
 #include "eventlist.h"
 #include <string.h>
+#include <limits.h>
+
+// Calculate the maximum number of digits for an unsigned int
+#define UINT_MAX_DIGITS (1 + (CHAR_BIT * sizeof(unsigned int) - 1) / 3 + 1)
 
 static struct EventList* event_list = NULL;
 static unsigned int state_access_delay_ms = 0;
@@ -159,14 +163,14 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
 
 int ems_show(unsigned int event_id, int fd) {
   if (event_list == NULL) {
-    write(fd, "EMS state must be initialized\n", strlen("EMS state must be initialized\n"));
+    dprintf(fd, "EMS state must be initialized\n");
     return 1;
   }
 
   struct Event* event = get_event_with_delay(event_id);
 
   if (event == NULL) {
-    write(fd, "Event not found\n", strlen("Event not found\n"));
+    dprintf(fd, "Event not found\n");
     return 1;
   }
 
@@ -174,16 +178,11 @@ int ems_show(unsigned int event_id, int fd) {
     for (size_t j = 1; j <= event->cols; j++) {
       unsigned int* seat = get_seat_with_delay(event, seat_index(event, i, j));
 
-      // Use write to output binary data
-      ssize_t bytes_written = write(fd, seat, sizeof(unsigned int));
-      
-      if (bytes_written < 0){
-         return -1;
-      }
+      char seat_str[64];
+      snprintf(seat_str, 64, "%u ", *seat);
 
-      // Optionally, you can add a separator if needed
-      // char separator = ' ';
-      // write(fd, &separator, 1);
+      // Write the formatted seat string to the file
+      write(fd, seat_str, strlen(seat_str));
     }
 
     // Add a newline after each row
@@ -216,6 +215,7 @@ int ems_list_events(int fd) {
 
   return 0;
 }
+
 
 
 void ems_wait(unsigned int delay_ms) {
