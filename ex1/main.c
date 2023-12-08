@@ -122,8 +122,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
 }
 
 
-
-
+// Opens the jobs directory containing .jobs and .out
 // Opens the jobs directory containing .jobs and .out
 void process_directory(char argv[]) {
     DIR *dir = opendir(argv);
@@ -140,6 +139,9 @@ void process_directory(char argv[]) {
         // Check if the file has a ".jobs" extension
         if (endsWith(entry->d_name, ".jobs")) {
             printf("Found .jobs file: %s\n", entry->d_name);
+
+            // Reset the event list before processing each file
+            reset_event_list();
 
             // Construct the path to the job file
             char file_path[PATH_MAX];

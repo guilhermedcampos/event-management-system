@@ -62,6 +62,14 @@ int ems_init(unsigned int delay_ms) {
   return event_list == NULL;
 }
 
+// Function to reset the event list
+void reset_event_list() {
+  if (event_list != NULL) {
+    free_list(event_list);
+    event_list = create_list();
+  }
+}
+
 int ems_terminate() {
   if (event_list == NULL) {
     fprintf(stderr, "EMS state must be initialized\n");
@@ -69,6 +77,8 @@ int ems_terminate() {
   }
 
   free_list(event_list);
+  event_list = NULL; // Set event_list to NULL after freeing
+
   return 0;
 }
 
@@ -196,12 +206,12 @@ int ems_show(unsigned int event_id, int fd) {
 
 int ems_list_events(int fd) {
   if (event_list == NULL) {
-    write(fd, "EMS state must be initialized\n", strlen("EMS state must be initialized\n"));
+    fprintf(stderr, "EMS state must be initialized\n");
     return 1;
   }
 
   if (event_list->head == NULL) {
-    write(fd, "No events\n", strlen("No events\n"));
+    fprintf(stderr, "Event not found\n");
     return 0;
   }
 

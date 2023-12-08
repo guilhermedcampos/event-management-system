@@ -39,4 +39,5 @@ int ems_list_events(int fd);
 /// @param delay_us Delay in milliseconds.
 void ems_wait(unsigned int delay_ms);
 
+void reset_event_list();
 #endif  // EMS_OPERATIONS_H
