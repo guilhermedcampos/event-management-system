@@ -1,8 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-
+#include <unistd.h>
 #include "eventlist.h"
+#include <string.h>
+#include <limits.h>
+
+// Calculate the maximum number of digits for an unsigned int
+#define UINT_MAX_DIGITS (1 + (CHAR_BIT * sizeof(unsigned int) - 1) / 3 + 1)
 
 static struct EventList* event_list = NULL;
 static unsigned int state_access_delay_ms = 0;
@@ -57,6 +62,14 @@ int ems_init(unsigned int delay_ms) {
   return event_list == NULL;
 }
 
+// Function to reset the event list
+void reset_event_list() {
+  if (event_list != NULL) {
+    free_list(event_list);
+    event_list = create_list();
+  }
+}
+
 int ems_terminate() {
   if (event_list == NULL) {
     fprintf(stderr, "EMS state must be initialized\n");
@@ -64,6 +77,8 @@ int ems_terminate() {
   }
 
   free_list(event_list);
+  event_list = NULL; // Set event_list to NULL after freeing
+
   return 0;
 }
 
@@ -156,7 +171,7 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
   return 0;
 }
 
-int ems_show(unsigned int event_id) {
+int ems_show(unsigned int event_id, int fd) {
   if (event_list == NULL) {
     fprintf(stderr, "EMS state must be initialized\n");
     return 1;
@@ -172,38 +187,45 @@ int ems_show(unsigned int event_id) {
   for (size_t i = 1; i <= event->rows; i++) {
     for (size_t j = 1; j <= event->cols; j++) {
       unsigned int* seat = get_seat_with_delay(event, seat_index(event, i, j));
-      printf("%u", *seat);
 
-      if (j < event->cols) {
-        printf(" ");
-      }
+      char seat_str[64];
+      snprintf(seat_str, 64, "%u ", *seat);
+
+      // Write the formatted seat string to the file
+      write(fd, seat_str, strlen(seat_str));
     }
 
-    printf("\n");
+    // Add a newline after each row
+    char newline = '\n';
+    write(fd, &newline, 1);
   }
 
   return 0;
 }
-int ems_list_events() {
+
+
+int ems_list_events(int fd) {
   if (event_list == NULL) {
     fprintf(stderr, "EMS state must be initialized\n");
     return 1;
   }
 
   if (event_list->head == NULL) {
-    printf("No events\n");
-    return 0;
+    write(fd,"No events\n", strlen("No events\n"));
+  return 0;
   }
 
   struct ListNode* current = event_list->head;
   while (current != NULL) {
-    printf("Event: ");
-    printf("%u\n", (current->event)->id);
+    char buffer[64];  // Adjust the buffer size as needed
+    int length = snprintf(buffer, sizeof(buffer), "Event: %u\n", (current->event)->id);
+    write(fd, buffer, (size_t)length);
     current = current->next;
   }
 
   return 0;
 }
+
 
 
 void ems_wait(unsigned int delay_ms) {
