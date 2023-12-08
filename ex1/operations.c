@@ -173,14 +173,14 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
 
 int ems_show(unsigned int event_id, int fd) {
   if (event_list == NULL) {
-    dprintf(fd, "EMS state must be initialized\n");
+    fprintf(stderr, "EMS state must be initialized\n");
     return 1;
   }
 
   struct Event* event = get_event_with_delay(event_id);
 
   if (event == NULL) {
-    dprintf(fd, "Event not found\n");
+    fprintf(stderr, "Event not found\n");
     return 1;
   }
 
@@ -211,8 +211,8 @@ int ems_list_events(int fd) {
   }
 
   if (event_list->head == NULL) {
-    fprintf(stderr, "Event not found\n");
-    return 0;
+    write(fd,"No events\n", strlen("No events\n"));
+  return 0;
   }
 
   struct ListNode* current = event_list->head;
