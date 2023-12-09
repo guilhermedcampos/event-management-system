@@ -120,80 +120,68 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
 }
 
 void process_directory(char argv[], int max_proc) {
-    // Open the directory specified by the argv parameter
     DIR *dir = opendir(argv);
 
-    // Check if the directory opening was successful
     if (dir == NULL) {
         perror("Error opening directory");
         return;
     }
 
-    // Declare a struct dirent pointer to represent a directory entry
     struct dirent *entry;
-    int active_processes = 0; // Counter for active child processes
+    int active_processes = 0;
 
-    // Loop through each file in the directory
     while ((entry = readdir(dir)) != NULL) {
-        // Check if the file has a ".jobs" extension
         if (endsWith(entry->d_name, ".jobs")) {
-            // Print a message indicating that a ".jobs" file was found
             printf("Found .jobs file: %s\n", entry->d_name);
 
-            // Reset the event list before processing each file
             reset_event_list();
 
-            // Construct the full path to the ".jobs" file
             char file_path[PATH_MAX];
             snprintf(file_path, sizeof(file_path), "%s/%s", argv, entry->d_name);
 
-            // Construct the base name (without the extension) of the file
             char base_name[PATH_MAX];
             snprintf(base_name, sizeof(base_name), "%.*s", (int)(strrchr(entry->d_name, '.') - entry->d_name), entry->d_name);
 
-            // Open the ".jobs" file for reading
-            // Open the job file
             int fd = open(file_path, O_RDONLY);
             if (fd == -1) {
                 perror("Error opening job file");
-                continue;  // Move on to the next file
+                continue;
             }
 
-            // New child process
             pid_t pid = fork();
 
             if (pid == 0) {
                 // Child process
-                parse_jobs_file(fd, base_name,argv);
+                printf("Child process [%d] started\n", getpid());
+                parse_jobs_file(fd, base_name, argv);
                 close(fd);
+                printf("Child process [%d] finished\n", getpid());
                 exit(0);
             } else if (pid > 0) {
                 // Parent process
                 active_processes++;
+                printf("Parent process [%d] created child process [%d]\n", getpid(), pid);
 
-                // Check if the maximum number of processes has been reached
                 while (active_processes >= max_proc) {
                     int status;
-                    pid_t child_pid = waitpid(-1, &status, WNOHANG);
-                    // printar status
+                    pid_t child_pid = wait(&status);
                     if (child_pid > 0) {
                         active_processes--;
+                        printf("Parent process [%d] waited for child process [%d]\n", getpid(), child_pid);
                     }
                 }
             } else {
-                // Fork failed
                 perror("Fork failed");
             }
         }
     }
 
-    // Wait for remaining child processes to finish
     while (active_processes > 0) {
         int status;
-        pid_t child_pid = waitpid(-1, &status, 0);
-        // printar status
+        pid_t child_pid = wait(&status);
         if (child_pid > 0) {
             active_processes--;
+            printf("Parent process [%d] waited for child process [%d]\n", getpid(), child_pid);
         }
     }
 

@@ -89,7 +89,7 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
   }
 
   if (get_event_with_delay(event_id) != NULL) {
-    fprintf(stderr, "Event already exists\n");
+    //fprintf(stderr, "Event already exists\n");
     return 1;
   }
 
@@ -135,7 +135,7 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
   struct Event* event = get_event_with_delay(event_id);
 
   if (event == NULL) {
-    fprintf(stderr, "Event not found\n");
+    //printf(stderr, "Event not found\n");
     return 1;
   }
 
@@ -147,7 +147,7 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
     size_t col = ys[i];
 
     if (row <= 0 || row > event->rows || col <= 0 || col > event->cols) {
-      fprintf(stderr, "Invalid seat\n");
+      //fprintf(stderr, "Invalid seat\n");
       break;
     }
 
@@ -180,7 +180,7 @@ int ems_show(unsigned int event_id, int fd) {
   struct Event* event = get_event_with_delay(event_id);
 
   if (event == NULL) {
-    fprintf(stderr, "Event not found\n");
+    //fprintf(stderr, "Event not found\n");
     return 1;
   }
 

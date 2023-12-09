@@ -119,56 +119,50 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
     fflush(stdout);  // Flush after processing each file
 }
 
+// Opens the jobs directory containing .jobs and .out
 void process_directory(char argv[]) {
-    // Open the directory specified by the argv parameter
     DIR *dir = opendir(argv);
 
-    // Check if the directory opening was successful
     if (dir == NULL) {
         perror("Error opening directory");
         return;
     }
 
-    // Declare a struct dirent pointer to represent a directory entry
     struct dirent *entry;
 
-    // Loop through each file in the directory
+    // For each file found in the directory
     while ((entry = readdir(dir)) != NULL) {
         // Check if the file has a ".jobs" extension
         if (endsWith(entry->d_name, ".jobs")) {
-            // Print a message indicating that a ".jobs" file was found
             printf("Found .jobs file: %s\n", entry->d_name);
 
             // Reset the event list before processing each file
             reset_event_list();
 
-            // Construct the full path to the ".jobs" file
+            // Construct the path to the job file
             char file_path[PATH_MAX];
             snprintf(file_path, sizeof(file_path), "%s/%s", argv, entry->d_name);
 
-            // Construct the base name (without the extension) of the file
+            // Construct the file name
             char base_name[PATH_MAX];
             snprintf(base_name, sizeof(base_name), "%.*s", (int)(strrchr(entry->d_name, '.') - entry->d_name), entry->d_name);
 
-            // Open the ".jobs" file for reading
+            // Open the job file
             int fd = open(file_path, O_RDONLY);
             if (fd == -1) {
                 perror("Error opening job file");
-                continue;  // Move on to the next file if opening fails
+                continue;  // Move on to the next file
             }
 
-            // Parse the content of the ".jobs" file
+            // Parse the .jobs file
             parse_jobs_file(fd, base_name, argv);
-
-            // Close the file descriptor for the ".jobs" file
             close(fd);
         }
     }
 
-    // Close the directory
+    // Close the jobs directory
     closedir(dir);
 }
-
 
 int main(int argc, char *argv[]) {
     unsigned int state_access_delay_ms = STATE_ACCESS_DELAY_MS;
