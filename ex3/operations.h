@@ -29,14 +29,15 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs, size_t *ys)
 /// Prints the given event.
 /// @param event_id Id of the event to print.
 /// @return 0 if the event was printed successfully, 1 otherwise.
-int ems_show(unsigned int event_id);
+int ems_show(unsigned int event_id, int fd);
 
 /// Prints all the events.
 /// @return 0 if the events were printed successfully, 1 otherwise.
-int ems_list_events();
+int ems_list_events(int fd);
 
 /// Waits for a given amount of time.
 /// @param delay_us Delay in milliseconds.
 void ems_wait(unsigned int delay_ms);
 
+void reset_event_list();
 #endif  // EMS_OPERATIONS_H
