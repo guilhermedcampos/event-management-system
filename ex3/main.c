@@ -5,16 +5,23 @@
 #include <string.h>
 #include <dirent.h>
 #include <fcntl.h>
-#include <sys/wait.h>
-#include <pthread.h>
-
+#include <sys/types.h>
+#include <sys/stat.h>
 #include "constants.h"
 #include "operations.h"
 #include "parser.h"
+#include <pthread.h>
 
-#define MAX_THREADS 1
-#define JOBS_DIR "jobs"  // name of the directory
+pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+// Structure to hold thread-specific data
+struct ThreadData {
+    int fd;
+    char base_name[PATH_MAX];
+    char argv[PATH_MAX];
+};
+
+// Function to check if a file has a given extension
 int endsWith(const char *str, const char *suffix) {
     size_t str_len = strlen(str);
     size_t suffix_len = strlen(suffix);
@@ -26,40 +33,32 @@ int endsWith(const char *str, const char *suffix) {
     return strcmp(str + (str_len - suffix_len), suffix) == 0;
 }
 
-void addToArray(unsigned int** createdEvents, int* size, unsigned int eventId) {
-   *size += 1;
+// Parses the content of a .jobs file
+void parse_jobs_file(int fd, const char *base_name, char argv[]) {
+    char out_file_path[PATH_MAX];
 
-   *createdEvents = (unsigned int*)realloc(*createdEvents, (size_t)*size * sizeof(int));
-   if (*createdEvents == NULL) {
-      fprintf(stdin, "Memory reallocation failed");
-      exit(EXIT_FAILURE);
-   }
+    // Construct the output file path
+    snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", argv, base_name);
 
-   (*createdEvents)[*size - 1] = eventId;
-}
-
-// Parses the .jobs file given, reading its content
-void parse_jobs_file(const char *file_path) {
-    int fd = open(file_path, O_RDONLY);
-    if (fd == -1) {
-        perror("Error opening job file");
+    // Open the output file for writing
+    int out_fd = open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC);
+    if (out_fd == -1) {
+        perror("Error opening output file");
         return;
     }
 
-    int end_of_cycle = 0;
-    int size = 0;
-    unsigned int* created_events = NULL;
-    unsigned int tid; 
+    int close_out_fd = 1;  // Flag to track if out_fd needs to be closed
 
-    while (!end_of_cycle) {
+    while (1) {
+        pthread_mutex_lock(&file_mutex);
         enum Command cmd = get_next(fd);
+        pthread_mutex_unlock(&file_mutex);
         switch (cmd) {
             case CMD_CREATE: {
                 unsigned int event_id;
                 size_t num_rows, num_cols;
                 if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
                     ems_create(event_id, num_rows, num_cols);
-                    addToArray(&created_events, &size, event_id);
                 }
                 break;
             }
@@ -78,149 +77,187 @@ void parse_jobs_file(const char *file_path) {
                 if (parse_show(fd, &event_id) != 0) {
                     fprintf(stderr, "Invalid command. See HELP for usage\n");
                 }
-                ems_show(event_id);
+                ems_show(event_id, out_fd);
                 break;
             }
 
             case CMD_LIST_EVENTS:
-                if (ems_list_events()) {
-                fprintf(stderr, "Failed to list events\n");
+                if (ems_list_events(out_fd)) {
+                    fprintf(stderr, "Failed to list events\n");
                 }
-
                 break;
 
-            case CMD_WAIT: {
-                    unsigned int delay;
-                    parse_wait(fd, &delay, &tid);
-                    sleep(delay * 1000); // Sleep for the specified delay
-                    break;
-                }
-
-            case CMD_HELP:
-            printf(
-                "Available commands:\n"
-                "  CREATE <event_id> <num_rows> <num_columns>\n"
-                "  RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
-                "  SHOW <event_id>\n"
-                "  LIST\n"
-                "  WAIT <delay_ms> [thread_id]\n"  // thread_id is not implemented
-                "  BARRIER\n"                      // Not implemented
-                "  HELP\n");
-            break;
+            case CMD_WAIT:
+                break;
 
             case CMD_INVALID:
                 fprintf(stderr, "Invalid command. See HELP for usage\n");
                 break;
 
+            case CMD_HELP:
+                printf(
+                    "Available commands:\n"
+                    "  CREATE <event_id> <num_rows> <num_columns>\n"
+                    "  RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
+                    "  SHOW <event_id>\n"
+                    "  LIST\n"
+                    "  WAIT <delay_ms> [thread_id]\n"  // thread_id is not implemented
+                    "  BARRIER\n"                      // Not implemented
+                    "  HELP\n");
+                break;
+
             case CMD_BARRIER:  // Not implemented
-            break;
+                break;
 
             case CMD_EMPTY:
-            break;
-
-            case EOC: {
-                if (created_events == NULL) {
-                    perror("No events to display.");
-                    break;
-                }
-
-                for (int i = 0; i < size; i++) {
-                    printf("Event: %u\n", created_events[i]);
-                    ems_show(created_events[i]);
-                    printf("\n");
-                }
-
-                free(created_events);
-                end_of_cycle = 1;
-                created_events = NULL;
                 break;
-            }
+
+            case EOC:
+                close_out_fd = 0;  // Flag to track if out_fd needs to be closed
+                break;
+
             default:
                 break;
         }
+
+        if (!close_out_fd) {
+            break;  // Break out of the loop when EOC is encountered
+        }
     }
 
+    // Close file descriptors outside the loop
+    close(fd);    // Close input file descriptor
+    close(out_fd); // Close output file descriptor
+    fflush(stdout);  // Flush after processing each file
+}
+
+void* process_file_thread(void *arg) {
+    struct ThreadData *thread_data = (struct ThreadData *)arg;
+
+    // Construct the path to the job file
+    char file_path[PATH_MAX];
+    snprintf(file_path, sizeof(file_path), "%s/%s.jobs", thread_data->argv, thread_data->base_name);
+
+    // Open the job file
+    int fd = open(file_path, O_RDONLY);
+    if (fd == -1) {
+        perror("Error opening job file");
+        free(thread_data);
+        pthread_exit(NULL);
+    }
+
+    // Create thread data and populate it
+    struct ThreadData *new_thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
+    new_thread_data->fd = fd;
+    snprintf(new_thread_data->base_name, sizeof(new_thread_data->base_name), "%s", thread_data->base_name);
+    snprintf(new_thread_data->argv, sizeof(new_thread_data->argv), "%s", thread_data->argv);
+
+    // Parse the .jobs file
+    parse_jobs_file(new_thread_data->fd, new_thread_data->base_name, new_thread_data->argv);
+
+    // Close the file descriptor
     close(fd);
+
+    // Clean up memory allocated for the thread data
+    free(new_thread_data);
+
+    // Exit the thread
+    pthread_exit(NULL);
 }
 
-void* process_job(void* arg) {
-    const char* file_path = (const char*)arg;
-    parse_jobs_file(file_path);
-    return NULL;
-}
+// Opens the jobs directory containing .jobs and .out
+void process_directory(char argv[], int max_threads) {
 
-void process_jobs_directory() {
-    DIR* dir = opendir(JOBS_DIR);
+    pthread_t threads[max_threads];
+
+    DIR *dir = opendir(argv);
 
     if (dir == NULL) {
         perror("Error opening directory");
         return;
     }
 
-    struct dirent* entry;
-    int thread_count = 0;
-    pthread_t threads[MAX_THREADS];
+    struct dirent *entry;
 
+    // For each file found in the directory
     while ((entry = readdir(dir)) != NULL) {
         // Check if the file has a ".jobs" extension
         if (endsWith(entry->d_name, ".jobs")) {
             printf("Found .jobs file: %s\n", entry->d_name);
 
-            // Construct the full path to the job file
-            char file_path[PATH_MAX];
-            snprintf(file_path, sizeof(file_path), "%s/%s", JOBS_DIR, entry->d_name);
+            // Reset the event list before processing each file
+            reset_event_list();
 
-            // Create a thread for each job file
-            if (pthread_create(&threads[thread_count], NULL, process_job, (void*)file_path) != 0) {
-                fprintf(stderr, "Error creating thread.\n");
-                break;
+            // Construct the path to the job file
+            char file_path[PATH_MAX];
+            snprintf(file_path, sizeof(file_path), "%s/%s", argv, entry->d_name);
+
+            // Construct the file name
+            char base_name[PATH_MAX];
+            snprintf(base_name, sizeof(base_name), "%.*s", (int)(strrchr(entry->d_name, '.') - entry->d_name), entry->d_name);
+
+            // Open the job file
+            int fd = open(file_path, O_RDONLY);
+            if (fd == -1) {
+                perror("Error opening job file");
+                continue;  // Move on to the next file
             }
 
-            // Increment the thread count
-            thread_count++;
+            // Create thread data and populate it
+            for (int i = 0; i < max_threads; ++i) {
+                // Allocate separate memory for each thread
+                struct ThreadData *thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
+                thread_data->fd = fd;
+                snprintf(thread_data->base_name, sizeof(thread_data->base_name), "%s", base_name);
+                snprintf(thread_data->argv, sizeof(thread_data->argv), "%s", argv);
 
-            // Check if the maximum number of threads has been reached
-            if (thread_count >= MAX_THREADS) {
-                // Wait for threads to finish
-                for (int i = 0; i < thread_count; i++) {
-                    pthread_join(threads[i], NULL);
+                // Create threads to process the file
+                if (pthread_create(&threads[i], NULL, process_file_thread, (void *)thread_data) != 0) {
+                    perror("Error creating thread");
+                    return;
                 }
-                // Reset the thread count
-                thread_count = 0;
+            }
+
+            // Wait for all threads to finish
+            for (int i = 0; i < max_threads; ++i) {
+                pthread_join(threads[i], NULL);
             }
         }
     }
 
-    // Wait for remaining threads to finish
-    for (int i = 0; i < thread_count; i++) {
-        pthread_join(threads[i], NULL);
-    }
-
+    // Close the jobs directory
     closedir(dir);
 }
 
 int main(int argc, char *argv[]) {
-  unsigned int state_access_delay_ms = STATE_ACCESS_DELAY_MS;
+    unsigned int state_access_delay_ms = STATE_ACCESS_DELAY_MS;
 
-  if (argc > 1) {
-    char *endptr;
-    unsigned long int delay = strtoul(argv[1], &endptr, 10);
 
-    if (*endptr != '\0' || delay > UINT_MAX) {
-      fprintf(stderr, "Invalid delay value or value too large\n");
-      return 1;
+    // Check if the number of arguments is correct
+    if (argc != 2 && argc != 3) {
+        fprintf(stderr, "Usage: %s <directory> [number]\n", argv[0]);
+        return 1;
     }
 
-    state_access_delay_ms = (unsigned int)delay;
-  }
+    // Set the directory
+    char *directory = argv[1];
 
-  if (ems_init(state_access_delay_ms)) {
-    fprintf(stderr, "Failed to initialize EMS\n");
-    return 1;
-  }
+    // Declare max_proc outside the if block
+    int max_threds = 1;  // Initialize to a default value, or any suitable default
 
-  process_jobs_directory();
+    // Check if the optional number argument is provided
+    if (argc == 3) {
+        char *endptr;
+        max_threds = (int)strtoul(argv[2], &endptr, 10);
+    }
 
-        ems_terminate();
-        return 0;
+    if (ems_init(state_access_delay_ms)) {
+        fprintf(stderr, "Failed to initialize EMS\n");
+        return 1;
+    }
+    // Process the directory
+    process_directory(directory, max_threds);
+
+    ems_terminate();
+    return 0;
 }
