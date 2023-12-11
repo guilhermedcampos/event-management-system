@@ -17,6 +17,7 @@ pthread_mutex_t cycle_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Structure to hold thread-specific data
 struct ThreadData {
+    int id;
     int fd;
     char base_name[PATH_MAX];
     char argv[PATH_MAX];
@@ -35,7 +36,7 @@ int endsWith(const char *str, const char *suffix) {
 }
 
 // Parses the content of a .jobs file
-void parse_jobs_file(int fd, const char *base_name, char argv[]) {
+void parse_jobs_file(int fd, const char *base_name, char argv[], int id) {
     char out_file_path[PATH_MAX];
 
     // Construct the output file path
@@ -47,7 +48,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
         perror("Error opening output file");
         return;
     }
-
+    
     int close_out_fd = 1;  // Flag to track if out_fd needs to be closed
     pthread_mutex_lock(&cycle_mutex);
     while (1) {
@@ -88,9 +89,17 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
                 }
                 break;
 
-            case CMD_WAIT:
+            case CMD_WAIT:{
+                unsigned int delay_ms, thread_id;
+                if (parse_wait(fd, &delay_ms, &thread_id) == 1) {
+                    if (thread_id == id) {
+                        // If the parsed thread_id matches the current thread's id, wait
+                        ems_wait(delay_ms);
+                        printf("waiting");
+                    }
+                } // add case where all threads wait
                 break;
-
+            }
             case CMD_INVALID:
                 fprintf(stderr, "Invalid command. See HELP for usage\n");
                 break;
@@ -154,7 +163,7 @@ void* process_file_thread(void *arg) {
     snprintf(new_thread_data->argv, sizeof(new_thread_data->argv), "%s", thread_data->argv);
 
     // Parse the .jobs file
-    parse_jobs_file(new_thread_data->fd, new_thread_data->base_name, new_thread_data->argv);
+    parse_jobs_file(new_thread_data->fd, new_thread_data->base_name, new_thread_data->argv, new_thread_data->id);
 
     // Close the file descriptor
     close(fd);
@@ -180,6 +189,12 @@ void process_directory(char argv[], int max_proc, int max_threads) {
 
     struct dirent *entry;
     int active_processes = 0;
+    int thread_ids[max_threads];  // Array to store thread IDs
+
+    // Initialize thread IDs
+    for (int i = 0; i < max_threads; ++i) {
+        thread_ids[i] = i + 1;
+    }
 
     // For each file found in the directory
     while ((entry = readdir(dir)) != NULL) {
@@ -214,6 +229,7 @@ void process_directory(char argv[], int max_proc, int max_threads) {
             for (int i = 0; i < max_threads; ++i) {
                 // Allocate separate memory for each thread
                 struct ThreadData *thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
+                thread_data->id = thread_ids[i];
                 thread_data->fd = fd;
                 snprintf(thread_data->base_name, sizeof(thread_data->base_name), "%s", base_name);
                 snprintf(thread_data->argv, sizeof(thread_data->argv), "%s", argv);
