@@ -15,11 +15,14 @@
 
 pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cycle_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t current_thread_mutex = PTHREAD_MUTEX_INITIALIZER;
+volatile int current_thread = 1;
 
 // Structure to hold thread-specific data
 struct ThreadData {
     int id;
     int fd;
+    int max_thr;
     char base_name[PATH_MAX];
     char argv[PATH_MAX];
 };
@@ -37,7 +40,7 @@ int endsWith(const char *str, const char *suffix) {
 }
 
 // Parses the content of a .jobs file
-void parse_jobs_file(int fd, const char *base_name, char argv[], int id) {
+void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max_thr) {
     char out_file_path[PATH_MAX];
 
     // Construct the output file path
@@ -53,10 +56,10 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id) {
     int close_out_fd = 1;  // Flag to track if out_fd needs to be closed
     pthread_mutex_lock(&cycle_mutex);
     while (1) {
+        pthread_mutex_unlock(&current_thread_mutex);
         pthread_mutex_lock(&file_mutex);
         enum Command cmd = get_next(fd);
         pthread_mutex_unlock(&file_mutex);
-        printf("Thread %d processing line\n", id);
         switch (cmd) {
             case CMD_CREATE: {
                 unsigned int event_id;
@@ -161,12 +164,13 @@ void* process_file_thread(void *arg) {
     // Create thread data and populate it
     struct ThreadData *new_thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
     new_thread_data->id = thread_data->id;
+    new_thread_data->max_thr = thread_data->max_thr;
     new_thread_data->fd = fd;
     snprintf(new_thread_data->base_name, sizeof(new_thread_data->base_name), "%s", thread_data->base_name);
     snprintf(new_thread_data->argv, sizeof(new_thread_data->argv), "%s", thread_data->argv);
 
     // Parse the .jobs file
-    parse_jobs_file(new_thread_data->fd, new_thread_data->base_name, new_thread_data->argv, new_thread_data->id);
+    parse_jobs_file(new_thread_data->fd, new_thread_data->base_name, new_thread_data->argv, new_thread_data->id, new_thread_data->max_thr);
 
     // Close the file descriptor
     close(fd);
@@ -233,6 +237,7 @@ void process_directory(char argv[], int max_proc, int max_threads) {
                 // Allocate separate memory for each thread
                 struct ThreadData *thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
                 thread_data->id = thread_ids[i];
+                thread_data->max_thr = max_threads;
                 thread_data->fd = fd;
                 snprintf(thread_data->base_name, sizeof(thread_data->base_name), "%s", base_name);
                 snprintf(thread_data->argv, sizeof(thread_data->argv), "%s", argv);
