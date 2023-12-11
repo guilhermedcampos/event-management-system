@@ -7,15 +7,14 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <pthread.h>
 #include "constants.h"
 #include "operations.h"
 #include "parser.h"
-#include <pthread.h>
 
-pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-// Structure to hold thread-specific data
-struct ThreadData {
+// Structure to hold the arguments for the thread function
+struct ThreadArgs {
     int fd;
     char base_name[PATH_MAX];
     char argv[PATH_MAX];
@@ -50,9 +49,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
     int close_out_fd = 1;  // Flag to track if out_fd needs to be closed
 
     while (1) {
-        pthread_mutex_lock(&file_mutex);
         enum Command cmd = get_next(fd);
-        pthread_mutex_unlock(&file_mutex);
         switch (cmd) {
             case CMD_CREATE: {
                 unsigned int event_id;
@@ -88,6 +85,11 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
                 break;
 
             case CMD_WAIT:
+                unsigned int delay;
+                unsigned int tid;
+                if (parse_wait(fd, &delay, &tid)) {
+
+                }
                 break;
 
             case CMD_INVALID:
@@ -131,45 +133,22 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
     fflush(stdout);  // Flush after processing each file
 }
 
-void* process_file_thread(void *arg) {
-    struct ThreadData *thread_data = (struct ThreadData *)arg;
+// Thread function
+void *thread_function(void *arg) {
+    // Cast the argument back to the correct type
+    struct ThreadArgs *args = (struct ThreadArgs *)arg;
 
-    // Construct the path to the job file
-    char file_path[PATH_MAX];
-    snprintf(file_path, sizeof(file_path), "%s/%s.jobs", thread_data->argv, thread_data->base_name);
+    // Access the arguments
+    printf("Thread [%lu] started\n", pthread_self());
+    parse_jobs_file(args->fd, args->base_name, args->argv);
+    printf("Thread [%lu] finished\n", pthread_self());
 
-    // Open the job file
-    int fd = open(file_path, O_RDONLY);
-    if (fd == -1) {
-        perror("Error opening job file");
-        free(thread_data);
-        pthread_exit(NULL);
-    }
-
-    // Create thread data and populate it
-    struct ThreadData *new_thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
-    new_thread_data->fd = fd;
-    snprintf(new_thread_data->base_name, sizeof(new_thread_data->base_name), "%s", thread_data->base_name);
-    snprintf(new_thread_data->argv, sizeof(new_thread_data->argv), "%s", thread_data->argv);
-
-    // Parse the .jobs file
-    parse_jobs_file(new_thread_data->fd, new_thread_data->base_name, new_thread_data->argv);
-
-    // Close the file descriptor
-    close(fd);
-
-    // Clean up memory allocated for the thread data
-    free(new_thread_data);
-
-    // Exit the thread
+    // Clean up and exit the thread
+    free(arg);
     pthread_exit(NULL);
 }
 
-// Opens the jobs directory containing .jobs and .out
-void process_directory(char argv[], int max_threads) {
-
-    pthread_t threads[max_threads];
-
+void process_directory(char argv[], int max_proc, int max_thr) {
     DIR *dir = opendir(argv);
 
     if (dir == NULL) {
@@ -178,86 +157,113 @@ void process_directory(char argv[], int max_threads) {
     }
 
     struct dirent *entry;
+    int active_processes = 0;
 
-    // For each file found in the directory
     while ((entry = readdir(dir)) != NULL) {
-        // Check if the file has a ".jobs" extension
         if (endsWith(entry->d_name, ".jobs")) {
             printf("Found .jobs file: %s\n", entry->d_name);
 
-            // Reset the event list before processing each file
             reset_event_list();
 
-            // Construct the path to the job file
             char file_path[PATH_MAX];
             snprintf(file_path, sizeof(file_path), "%s/%s", argv, entry->d_name);
 
-            // Construct the file name
             char base_name[PATH_MAX];
             snprintf(base_name, sizeof(base_name), "%.*s", (int)(strrchr(entry->d_name, '.') - entry->d_name), entry->d_name);
 
-            // Open the job file
             int fd = open(file_path, O_RDONLY);
             if (fd == -1) {
                 perror("Error opening job file");
-                continue;  // Move on to the next file
+                continue;
             }
 
-            // Create thread data and populate it
-            for (int i = 0; i < max_threads; ++i) {
-                // Allocate separate memory for each thread
-                struct ThreadData *thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
-                thread_data->fd = fd;
-                snprintf(thread_data->base_name, sizeof(thread_data->base_name), "%s", base_name);
-                snprintf(thread_data->argv, sizeof(thread_data->argv), "%s", argv);
+            pid_t pid = fork();
 
-                // Create threads to process the file
-                if (pthread_create(&threads[i], NULL, process_file_thread, (void *)thread_data) != 0) {
-                    perror("Error creating thread");
-                    return;
+            // Inside your main function or wherever you're creating threads
+            if (pid == 0) {
+                pthread_t thr[max_thr];
+                struct ThreadArgs thread_args[max_thr];
+
+                // Initialize and set up the thread arguments
+                for (int i = 0; i < max_thr; i++) {
+                    thread_args[i].fd = fd;
+                    snprintf(thread_args[i].base_name, sizeof(thread_args[i].base_name), "%.*s", (int)(strrchr(entry->d_name, '.') - entry->d_name), entry->d_name);
+                    snprintf(thread_args[i].argv, sizeof(thread_args[i].argv), "%s", argv);
+
+                    // Create a new thread
+                    pthread_create(&thr[i], NULL, thread_function, (void *)&thread_args[i]);
                 }
-            }
 
-            // Wait for all threads to finish
-            for (int i = 0; i < max_threads; ++i) {
-                pthread_join(threads[i], NULL);
+                // Wait for all threads to finish
+                for (int i = 0; i < max_thr; i++) {
+                    pthread_join(thr[i], NULL);
+                }
+
+                close(fd);
+                exit(0);
+            } else if (pid > 0) {
+                // Parent process
+                active_processes++;
+                //printf("Parent process [%d] created child process [%d]\n", getpid(), pid);
+
+                while (active_processes >= max_proc) {
+                    int status;
+                    pid_t child_pid = wait(&status);
+                    if (child_pid > 0) {
+                        active_processes--;
+                        //printf("Parent process [%d] waited for child process [%d]\n", getpid(), child_pid);
+                    }
+                }
+            } else {
+                perror("Fork failed");
             }
         }
     }
 
-    // Close the jobs directory
+    while (active_processes > 0) {
+        int status;
+        pid_t child_pid = wait(&status);
+        if (child_pid > 0) {
+            active_processes--;
+            //printf("Parent process [%d] waited for child process [%d]\n", getpid(), child_pid);
+        }
+    }
+
     closedir(dir);
 }
+
+
 
 int main(int argc, char *argv[]) {
     unsigned int state_access_delay_ms = STATE_ACCESS_DELAY_MS;
 
-
     // Check if the number of arguments is correct
-    if (argc != 2 && argc != 3) {
-        fprintf(stderr, "Usage: %s <directory> [number]\n", argv[0]);
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s <directory> <max_proc> <max_thr>\n", argv[0]);
         return 1;
     }
 
     // Set the directory
     char *directory = argv[1];
 
-    // Declare max_proc outside the if block
-    int max_threds = 1;  // Initialize to a default value, or any suitable default
+    // Declare max_proc and max_thr
+    int max_proc, max_thr;
 
-    // Check if the optional number argument is provided
-    if (argc == 3) {
-        char *endptr;
-        max_threds = (int)strtoul(argv[2], &endptr, 10);
-    }
+    // Parse max_proc and max_thr from command-line arguments
+    char *endptr;
+    max_proc = (int)strtoul(argv[2], &endptr, 10);
+    max_thr = (int)strtoul(argv[3], &endptr, 10);
 
     if (ems_init(state_access_delay_ms)) {
         fprintf(stderr, "Failed to initialize EMS\n");
         return 1;
     }
+
     // Process the directory
-    process_directory(directory, max_threds);
+    process_directory(directory, max_proc, max_thr);
 
     ems_terminate();
     return 0;
 }
+
+

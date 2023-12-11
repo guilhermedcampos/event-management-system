@@ -231,29 +231,35 @@ int parse_show(int fd, unsigned int *event_id) {
 }
 
 int parse_wait(int fd, unsigned int *delay, unsigned int *thread_id) {
-  char ch;
+    char ch;
 
-  if (read_uint(fd, delay, &ch) != 0) {
-    cleanup(fd);
-    return -1;
-  }
-
-  if (ch == ' ') {
-    if (thread_id == NULL) {
-      cleanup(fd);
-      return 0;
+    if (read_uint(fd, delay, &ch) != 0) {
+        cleanup(fd);
+        return -1;
     }
 
-    if (read_uint(fd, thread_id, &ch) != 0 || (ch != '\n' && ch != '\0')) {
-      cleanup(fd);
-      return -1;
-    }
+    // Check for optional thread_id
+    if (ch == ' ') {
+        if (thread_id == NULL) {
+            cleanup(fd);
+            return 0;  // No thread_id expected, return success
+        }
 
-    return 1;
-  } else if (ch == '\n' || ch == '\0') {
-    return 0;
-  } else {
-    cleanup(fd);
-    return -1;
-  }
+        // Read thread_id
+        if (read_uint(fd, thread_id, &ch) != 0 || (ch != '\n' && ch != '\0')) {
+            cleanup(fd);
+            return -1;
+        }
+
+        return 1;  // Thread_id provided
+    } else if (ch == '\n' || ch == '\0') {
+        // No thread_id provided
+        if (thread_id != NULL) {
+            *thread_id = 0;  // Set thread_id to a default value
+        }
+        return 0;
+    } else {
+        cleanup(fd);
+        return -1;
+    }
 }
