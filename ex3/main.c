@@ -13,6 +13,7 @@
 #include <pthread.h>
 
 pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t cycle_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Structure to hold thread-specific data
 struct ThreadData {
@@ -48,7 +49,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
     }
 
     int close_out_fd = 1;  // Flag to track if out_fd needs to be closed
-
+    pthread_mutex_lock(&cycle_mutex);
     while (1) {
         pthread_mutex_lock(&file_mutex);
         enum Command cmd = get_next(fd);
@@ -124,7 +125,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[]) {
             break;  // Break out of the loop when EOC is encountered
         }
     }
-
+    pthread_mutex_unlock(&cycle_mutex);
     // Close file descriptors outside the loop
     close(fd);    // Close input file descriptor
     close(out_fd); // Close output file descriptor
