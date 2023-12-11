@@ -56,6 +56,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id) {
         pthread_mutex_lock(&file_mutex);
         enum Command cmd = get_next(fd);
         pthread_mutex_unlock(&file_mutex);
+        printf("Thread %d processing line\n", id);
         switch (cmd) {
             case CMD_CREATE: {
                 unsigned int event_id;
@@ -159,6 +160,7 @@ void* process_file_thread(void *arg) {
 
     // Create thread data and populate it
     struct ThreadData *new_thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
+    new_thread_data->id = thread_data->id;
     new_thread_data->fd = fd;
     snprintf(new_thread_data->base_name, sizeof(new_thread_data->base_name), "%s", thread_data->base_name);
     snprintf(new_thread_data->argv, sizeof(new_thread_data->argv), "%s", thread_data->argv);
@@ -253,14 +255,14 @@ void process_directory(char argv[], int max_proc, int max_threads) {
             } else if (pid > 0) {
                 // Parent process
                 active_processes++;
-                printf("Parent process [%d] created child process [%d]\n", getpid(), pid);
+                //printf("Parent process [%d] created child process [%d]\n", getpid(), pid);
 
                 while (active_processes >= max_proc) {
                     int status;
                     pid_t child_pid = wait(&status);
                     if (child_pid > 0) {
                         active_processes--;
-                        printf("Parent process [%d] waited for child process [%d]\n", getpid(), child_pid);
+                        //printf("Parent process [%d] waited for child process [%d]\n", getpid(), child_pid);
                     }
                 }
             } else {
@@ -273,7 +275,7 @@ void process_directory(char argv[], int max_proc, int max_threads) {
         pid_t child_pid = wait(&status);
         if (child_pid > 0) {
             active_processes--;
-            printf("Parent process [%d] waited for child process [%d]\n", getpid(), child_pid);
+            //printf("Parent process [%d] waited for child process [%d]\n", getpid(), child_pid);
         }
     }
     // Close the jobs directory
