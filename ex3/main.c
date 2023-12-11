@@ -166,7 +166,7 @@ void* process_file_thread(void *arg) {
 }
 
 // Opens the jobs directory containing .jobs and .out
-void process_directory(char argv[], int max_threads) {
+void process_directory(char argv[], int max_proc, int max_threads) {
 
     pthread_t threads[max_threads];
 
@@ -178,6 +178,7 @@ void process_directory(char argv[], int max_threads) {
     }
 
     struct dirent *entry;
+    int active_processes = 0;
 
     // For each file found in the directory
     while ((entry = readdir(dir)) != NULL) {
@@ -203,7 +204,12 @@ void process_directory(char argv[], int max_threads) {
                 continue;  // Move on to the next file
             }
 
-            // Create thread data and populate it
+            pid_t pid = fork();
+
+            if (pid == 0) {
+                // Child process
+
+                            // Create thread data and populate it
             for (int i = 0; i < max_threads; ++i) {
                 // Allocate separate memory for each thread
                 struct ThreadData *thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
@@ -222,20 +228,45 @@ void process_directory(char argv[], int max_threads) {
             for (int i = 0; i < max_threads; ++i) {
                 pthread_join(threads[i], NULL);
             }
+ 
+
+
+                exit(0);
+            } else if (pid > 0) {
+                // Parent process
+                active_processes++;
+                printf("Parent process [%d] created child process [%d]\n", getpid(), pid);
+
+                while (active_processes >= max_proc) {
+                    int status;
+                    pid_t child_pid = wait(&status);
+                    if (child_pid > 0) {
+                        active_processes--;
+                        printf("Parent process [%d] waited for child process [%d]\n", getpid(), child_pid);
+                    }
+                }
+            } else {
+                perror("Fork failed");
+            }
         }
     }
-
+     while (active_processes > 0) {
+        int status;
+        pid_t child_pid = wait(&status);
+        if (child_pid > 0) {
+            active_processes--;
+            printf("Parent process [%d] waited for child process [%d]\n", getpid(), child_pid);
+        }
+    }
     // Close the jobs directory
     closedir(dir);
 }
-
 int main(int argc, char *argv[]) {
     unsigned int state_access_delay_ms = STATE_ACCESS_DELAY_MS;
 
-
     // Check if the number of arguments is correct
-    if (argc != 2 && argc != 3) {
-        fprintf(stderr, "Usage: %s <directory> [number]\n", argv[0]);
+    if (argc != 2 && argc != 4) {
+        fprintf(stderr, "Usage: %s <directory> [number] <max_threads>\n", argv[0]);
         return 1;
     }
 
@@ -243,20 +274,23 @@ int main(int argc, char *argv[]) {
     char *directory = argv[1];
 
     // Declare max_proc outside the if block
-    int max_threds = 1;  // Initialize to a default value, or any suitable default
+    int max_proc = 1;  // Initialize to a default value, or any suitable default
+    int max_threads = 1;
 
     // Check if the optional number argument is provided
-    if (argc == 3) {
+    if (argc == 4) {
         char *endptr;
-        max_threds = (int)strtoul(argv[2], &endptr, 10);
+        max_proc = (int)strtoul(argv[2], &endptr, 10);
+        max_threads = (int)strtoul(argv[3], &endptr, 10);
     }
 
     if (ems_init(state_access_delay_ms)) {
         fprintf(stderr, "Failed to initialize EMS\n");
         return 1;
     }
+
     // Process the directory
-    process_directory(directory, max_threds);
+    process_directory(directory, max_proc, max_threads);
 
     ems_terminate();
     return 0;
