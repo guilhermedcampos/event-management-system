@@ -146,7 +146,7 @@ void* process_file_thread(void *arg) {
     struct ThreadData *thread_data = (struct ThreadData *)arg;
 
     // Construct the path to the job file
-    char file_path[PATH_MAX];
+    char file_path[8197]; // PATH_MAX * 2 (para nao dar buffer overflow)
     snprintf(file_path, sizeof(file_path), "%s/%s.jobs", thread_data->argv, thread_data->base_name);
 
     // Open the job file
