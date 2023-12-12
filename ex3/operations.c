@@ -286,7 +286,7 @@ int ems_list_events(int fd) {
   // Unlock the mutex for the file descriptor (fd)
   pthread_mutex_unlock(&event_list_mutex);
 
-   pthread_mutex_unlock(&fd_mutex);
+  pthread_mutex_unlock(&fd_mutex);
 
   return 0;
 }
