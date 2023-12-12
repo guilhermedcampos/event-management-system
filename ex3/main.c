@@ -15,11 +15,11 @@
 
 pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cycle_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t current_thread_mutex = PTHREAD_MUTEX_INITIALIZER;
-volatile int current_thread = 1;
+
 
 // Structure to hold thread-specific data
 struct ThreadData {
+    int num_lines;
     int id;
     int fd;
     int max_thr;
@@ -39,10 +39,64 @@ int endsWith(const char *str, const char *suffix) {
     return strcmp(str + (str_len - suffix_len), suffix) == 0;
 }
 
-// Parses the content of a .jobs file
-void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max_thr) {
-    char out_file_path[PATH_MAX];
+int numLines(const char *file_path) {
+    int count = 0;
+    char c;
 
+    int fd = open(file_path, O_RDONLY);
+
+    if (fd == -1) {
+        // Handle file open error
+        perror("Error opening file");
+        return -1; // Return an error value
+    }
+
+    // Read the file character by character
+    while (read(fd, &c, 1) > 0) {
+        if (c == '\n') {
+            count++;
+        }
+    }
+
+    close(fd);
+
+    if (count > 0) {
+        // Increment count for the last line if it doesn't end with a newline
+        count++;
+    }
+
+    return count;
+}
+
+// converts offset to int line
+int get_line_number(int fd, off_t offset) {
+    char c;
+    off_t original_offset = lseek(fd, 0, SEEK_CUR);  // Save the original offset
+
+    lseek(fd, 0, SEEK_SET);  // Move to the beginning of the file
+
+    int line_number = 1;
+
+    while (lseek(fd, 0, SEEK_CUR) < offset) {
+        if (read(fd, &c, 1) == 0) {
+            // Break if end of file is reached
+            break;
+        }
+
+        if (c == '\n') {
+            line_number++;
+        }
+    }
+
+    lseek(fd, original_offset, SEEK_SET);  // Restore the original offset
+
+    return line_number;
+}
+
+// Parses the content of a .jobs file
+void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max_thr, int num_lines) {
+    char out_file_path[PATH_MAX];
+    
     // Construct the output file path
     snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", argv, base_name);
 
@@ -52,14 +106,24 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
         perror("Error opening output file");
         return;
     }
-    
+
     int close_out_fd = 1;  // Flag to track if out_fd needs to be closed
-    pthread_mutex_lock(&cycle_mutex);
-    while (1) {
-        pthread_mutex_unlock(&current_thread_mutex);
+    //pthread_mutex_lock(&cycle_mutex);
+    while (get_line_number(fd, lseek(fd, 0, SEEK_CUR)) <= num_lines) {
+        int x = (get_line_number(fd, lseek(fd, 0, SEEK_CUR)) % max_thr) + 1;
+        printf("Current line %d\n", get_line_number(fd, lseek(fd, 0, SEEK_CUR)));
+        //printf("File desc %d\n", fd);
+        //printf("Num lines %d\n", num_lines);
+        sleep(1);
+
+        if (x == id) {
+
         pthread_mutex_lock(&file_mutex);
         enum Command cmd = get_next(fd);
+        printf("thread %d\n", id);
         pthread_mutex_unlock(&file_mutex);
+
+        
         switch (cmd) {
             case CMD_CREATE: {
                 unsigned int event_id;
@@ -134,12 +198,13 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
             default:
                 break;
         }
-
+        
         if (!close_out_fd) {
             break;  // Break out of the loop when EOC is encountered
         }
+        }
     }
-    pthread_mutex_unlock(&cycle_mutex);
+    //pthread_mutex_unlock(&cycle_mutex);
     // Close file descriptors outside the loop
     close(fd);    // Close input file descriptor
     close(out_fd); // Close output file descriptor
@@ -162,21 +227,22 @@ void* process_file_thread(void *arg) {
     }
 
     // Create thread data and populate it
-    struct ThreadData *new_thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
-    new_thread_data->id = thread_data->id;
-    new_thread_data->max_thr = thread_data->max_thr;
-    new_thread_data->fd = fd;
-    snprintf(new_thread_data->base_name, sizeof(new_thread_data->base_name), "%s", thread_data->base_name);
-    snprintf(new_thread_data->argv, sizeof(new_thread_data->argv), "%s", thread_data->argv);
+    struct ThreadData *new_thr = (struct ThreadData *)malloc(sizeof(struct ThreadData));
+    new_thr->num_lines = thread_data->num_lines;
+    new_thr->id = thread_data->id;
+    new_thr->max_thr = thread_data->max_thr;
+    new_thr->fd = thread_data->fd;
+    snprintf(new_thr->base_name, sizeof(new_thr->base_name), "%s", thread_data->base_name);
+    snprintf(new_thr->argv, sizeof(new_thr->argv), "%s", thread_data->argv);
 
     // Parse the .jobs file
-    parse_jobs_file(new_thread_data->fd, new_thread_data->base_name, new_thread_data->argv, new_thread_data->id, new_thread_data->max_thr);
+    parse_jobs_file(new_thr->fd, new_thr->base_name, new_thr->argv, new_thr->id, new_thr->max_thr, new_thr->num_lines);
 
     // Close the file descriptor
     close(fd);
 
     // Clean up memory allocated for the thread data
-    free(new_thread_data);
+    free(new_thr);
 
     // Exit the thread
     pthread_exit(NULL);
@@ -232,10 +298,11 @@ void process_directory(char argv[], int max_proc, int max_threads) {
             if (pid == 0) {
                 // Child process
 
-                            // Create thread data and populate it
+            // Create thread data and populate it
             for (int i = 0; i < max_threads; ++i) {
                 // Allocate separate memory for each thread
                 struct ThreadData *thread_data = (struct ThreadData *)malloc(sizeof(struct ThreadData));
+                thread_data->num_lines = numLines(file_path);
                 thread_data->id = thread_ids[i];
                 thread_data->max_thr = max_threads;
                 thread_data->fd = fd;
