@@ -12,9 +12,11 @@
 #include "operations.h"
 #include "parser.h"
 #include <pthread.h>
+#include <stdbool.h>
 
 pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t cycle_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t ems_mutex = PTHREAD_MUTEX_INITIALIZER;
+bool eof_flag = false;
 
 
 // Structure to hold thread-specific data
@@ -96,7 +98,7 @@ int get_line_number(int fd, off_t offset) {
 // Parses the content of a .jobs file
 void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max_thr, int num_lines) {
     char out_file_path[PATH_MAX];
-    
+
     // Construct the output file path
     snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", argv, base_name);
 
@@ -108,106 +110,116 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
     }
 
     int close_out_fd = 1;  // Flag to track if out_fd needs to be closed
-    //pthread_mutex_lock(&cycle_mutex);
-    while (1) {
-        int x = (get_line_number(fd, lseek(fd, 0, SEEK_CUR)) % max_thr) + 1;
-        printf("Current line %d\n", get_line_number(fd, lseek(fd, 0, SEEK_CUR)));
-        //printf("File desc %d\n", fd);
-        //printf("Num lines %d\n", num_lines);
-        sleep(1);
 
-        if (x == id) {
-
-        pthread_mutex_lock(&file_mutex);
-        enum Command cmd = get_next(fd);
-        printf("thread %d\n", id);
-        pthread_mutex_unlock(&file_mutex);
-
-        
-        switch (cmd) {
-            case CMD_CREATE: {
-                unsigned int event_id;
-                size_t num_rows, num_cols;
-                if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
-                    ems_create(event_id, num_rows, num_cols);
-                }
-                break;
-            }
-            case CMD_RESERVE: {
-                unsigned int event_id;
-                size_t xs[MAX_RESERVATION_SIZE], ys[MAX_RESERVATION_SIZE];
-                size_t num_coords = parse_reserve(fd, MAX_RESERVATION_SIZE, &event_id, xs, ys);
-                if (num_coords > 0) {
-                    ems_reserve(event_id, num_coords, xs, ys);
-                }
-                break;
-            }
-
-            case CMD_SHOW: {
-                unsigned int event_id;
-                if (parse_show(fd, &event_id) != 0) {
-                    fprintf(stderr, "Invalid command. See HELP for usage\n");
-                }
-                ems_show(event_id, out_fd);
-                break;
-            }
-
-            case CMD_LIST_EVENTS:
-                if (ems_list_events(out_fd)) {
-                    fprintf(stderr, "Failed to list events\n");
-                }
-                break;
-
-            case CMD_WAIT:{
-                unsigned int delay_ms, thread_id;
-                if (parse_wait(fd, &delay_ms, &thread_id) == 1) {
-                    if (thread_id == id) {
-                        // If the parsed thread_id matches the current thread's id, wait
-                        ems_wait(delay_ms);
-                        printf("waiting");
+    while (!eof_flag) {
+            printf("Thread with id %d reading line %d.\n", id, get_line_number(fd, lseek(fd, 0, SEEK_CUR)));
+            pthread_mutex_lock(&file_mutex);
+            enum Command cmd = get_next(fd);
+            printf("thread %d\n", id);
+            switch (cmd) {
+                case CMD_CREATE: {
+                    printf("Thread %d creating.\n", id);
+                    unsigned int event_id;
+                    size_t num_rows, num_cols;
+                    if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
+                        pthread_mutex_unlock(&file_mutex);
+                        pthread_mutex_lock(&ems_mutex);
+                        ems_create(event_id, num_rows, num_cols);
+                        pthread_mutex_unlock(&ems_mutex);
+                    } else {
+                    pthread_mutex_unlock(&file_mutex);
                     }
-                } // add case where all threads wait
-                break;
-            }
-            case CMD_INVALID:
-                fprintf(stderr, "Invalid command. See HELP for usage\n");
-                break;
+                    break;
+                }
+                case CMD_RESERVE: {
+                    printf("Thread %d reserving.\n", id);
+                    unsigned int event_id;
+                    size_t xs[MAX_RESERVATION_SIZE], ys[MAX_RESERVATION_SIZE];
+                    size_t num_coords = parse_reserve(fd, MAX_RESERVATION_SIZE, &event_id, xs, ys);
+                    pthread_mutex_unlock(&file_mutex);
+                    if (num_coords > 0) {
+                        pthread_mutex_lock(&ems_mutex);
+                        ems_reserve(event_id, num_coords, xs, ys);
+                        pthread_mutex_unlock(&ems_mutex);
+                    }
+                    break;
+                }
+                case CMD_SHOW: {
+                    printf("Thread %d showing.\n", id);
+                    unsigned int event_id;
+                    if (parse_show(fd, &event_id) != 0) {
+                        fprintf(stderr, "Invalid command. See HELP for usage\n");
+                        pthread_mutex_unlock(&file_mutex);
+                    }else {
+                    pthread_mutex_unlock(&file_mutex);
+                    }
+                    pthread_mutex_lock(&ems_mutex);
+                    ems_show(event_id, out_fd);
+                    pthread_mutex_unlock(&ems_mutex);
+                    break;
+                }
+                case CMD_LIST_EVENTS: {
+                    printf("Thread %d listing.\n", id);
+                    pthread_mutex_lock(&ems_mutex);
+                    if (ems_list_events(out_fd)) {
+                        fprintf(stderr, "Failed to list events\n");
+                    }
+                    pthread_mutex_unlock(&ems_mutex);
+                    pthread_mutex_unlock(&file_mutex);
+                    break;
+                }
 
-            case CMD_HELP:
-                printf(
-                    "Available commands:\n"
-                    "  CREATE <event_id> <num_rows> <num_columns>\n"
-                    "  RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
-                    "  SHOW <event_id>\n"
-                    "  LIST\n"
-                    "  WAIT <delay_ms> [thread_id]\n"  // thread_id is not implemented
-                    "  BARRIER\n"                      // Not implemented
-                    "  HELP\n");
-                break;
+                case CMD_WAIT: {
+                    unsigned int delay_ms, thread_id;
+                    if (parse_wait(fd, &delay_ms, &thread_id) == 1) {
+                        if (thread_id == id) {
+                            // If the parsed thread_id matches the current thread's id, wait
+                            ems_wait(delay_ms);
+                            printf("waiting");
+                        }
+                    } // add case where all threads wait
+                    pthread_mutex_unlock(&file_mutex);
+                    break;
+                }
+                case CMD_INVALID:
+                    fprintf(stderr, "Invalid command. See HELP for usage\n");
+                    pthread_mutex_unlock(&file_mutex);
+                    break;
 
-            case CMD_BARRIER:  // Not implemented
-                break;
+                case CMD_HELP:
+                    printf(
+                        "Available commands:\n"
+                        "  CREATE <event_id> <num_rows> <num_columns>\n"
+                        "  RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
+                        "  SHOW <event_id>\n"
+                        "  LIST\n"
+                        "  WAIT <delay_ms> [thread_id]\n"  // thread_id is not implemented
+                        "  BARRIER\n"                      // Not implemented
+                        "  HELP\n");
+                    pthread_mutex_unlock(&file_mutex);
+                    break;
 
-            case CMD_EMPTY:
-                break;
+                case CMD_BARRIER:  // Not implemented
+                pthread_mutex_unlock(&file_mutex);
+                    break;
 
-            case EOC:
-                close_out_fd = 0;  // Flag to track if out_fd needs to be closed
-                close(out_fd);  // Close the output file descriptor
-                close(fd);      // Close the input file descriptor
-                break;
+                case CMD_EMPTY:
+                pthread_mutex_unlock(&file_mutex);
+                    break;
 
-            default:
-                break;
-        }
-        
-        if (!close_out_fd) {
-            break;  // Break out of the loop when EOC is encountered
-        }
+                case EOC:
+                    printf("Reached end of file.");
+                    eof_flag = true;
+                    pthread_mutex_unlock(&file_mutex);
+                    break;
+
+                default:
+                    pthread_mutex_unlock(&file_mutex);
+                    break;
+            
         }
     }
-    //pthread_mutex_unlock(&cycle_mutex);
-    // Close file descriptors outside the loop
+
     fflush(stdout);  // Flush after processing each file
 }
 
@@ -217,14 +229,6 @@ void* process_file_thread(void *arg) {
     // Construct the path to the job file
     char file_path[8197]; // PATH_MAX * 2 (para nao dar buffer overflow)
     snprintf(file_path, sizeof(file_path), "%s/%s.jobs", thread_data->argv, thread_data->base_name);
-
-    // Open the job file
-    int fd = open(file_path, O_RDONLY);
-    if (fd == -1) {
-        perror("Error opening job file");
-        free(thread_data);
-        pthread_exit(NULL);
-    }
 
     // Create thread data and populate it
     struct ThreadData *new_thr = (struct ThreadData *)malloc(sizeof(struct ThreadData));
@@ -239,8 +243,6 @@ void* process_file_thread(void *arg) {
     parse_jobs_file(new_thr->fd, new_thr->base_name, new_thr->argv, new_thr->id, new_thr->max_thr, new_thr->num_lines);
 
     // Close the file descriptor
-    close(fd);
-
     // Clean up memory allocated for the thread data
     free(new_thr);
 
@@ -250,8 +252,6 @@ void* process_file_thread(void *arg) {
 
 // Opens the jobs directory containing .jobs and .out
 void process_directory(char argv[], int max_proc, int max_threads) {
-
-    pthread_t threads[max_threads];
 
     DIR *dir = opendir(argv);
 
@@ -295,8 +295,9 @@ void process_directory(char argv[], int max_proc, int max_threads) {
 
             pid_t pid = fork();
 
-            if (pid == 0) {
-                // Child process
+            if (pid == 0) { // Child process
+
+            pthread_t threads[max_threads];
 
             // Create thread data and populate it
             for (int i = 0; i < max_threads; ++i) {
