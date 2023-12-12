@@ -110,12 +110,15 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
     }
 
     int close_out_fd = 1;  // Flag to track if out_fd needs to be closed
+    eof_flag = false;
 
     while (!eof_flag) {
             printf("Thread with id %d reading line %d.\n", id, get_line_number(fd, lseek(fd, 0, SEEK_CUR)));
+
             pthread_mutex_lock(&file_mutex);
             enum Command cmd = get_next(fd);
             printf("thread %d\n", id);
+
             switch (cmd) {
                 case CMD_CREATE: {
                     printf("Thread %d creating.\n", id);
@@ -123,9 +126,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
                     size_t num_rows, num_cols;
                     if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
                         pthread_mutex_unlock(&file_mutex);
-                        pthread_mutex_lock(&ems_mutex);
                         ems_create(event_id, num_rows, num_cols);
-                        pthread_mutex_unlock(&ems_mutex);
                     } else {
                     pthread_mutex_unlock(&file_mutex);
                     }
@@ -165,7 +166,6 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
                         fprintf(stderr, "Failed to list events\n");
                     }
                     pthread_mutex_unlock(&ems_mutex);
-                    pthread_mutex_unlock(&file_mutex);
                     break;
                 }
 
@@ -221,6 +221,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
     }
 
     fflush(stdout);  // Flush after processing each file
+    close(out_fd);
 }
 
 void* process_file_thread(void *arg) {
@@ -230,21 +231,14 @@ void* process_file_thread(void *arg) {
     char file_path[8197]; // PATH_MAX * 2 (para nao dar buffer overflow)
     snprintf(file_path, sizeof(file_path), "%s/%s.jobs", thread_data->argv, thread_data->base_name);
 
-    // Create thread data and populate it
-    struct ThreadData *new_thr = (struct ThreadData *)malloc(sizeof(struct ThreadData));
-    new_thr->num_lines = thread_data->num_lines;
-    new_thr->id = thread_data->id;
-    new_thr->max_thr = thread_data->max_thr;
-    new_thr->fd = thread_data->fd;
-    snprintf(new_thr->base_name, sizeof(new_thr->base_name), "%s", thread_data->base_name);
-    snprintf(new_thr->argv, sizeof(new_thr->argv), "%s", thread_data->argv);
+    
+    int fd = thread_data->fd;
 
     // Parse the .jobs file
-    parse_jobs_file(new_thr->fd, new_thr->base_name, new_thr->argv, new_thr->id, new_thr->max_thr, new_thr->num_lines);
-
+    parse_jobs_file(fd, thread_data->base_name, thread_data->argv, thread_data->id, thread_data->max_thr, thread_data->num_lines);
     // Close the file descriptor
-    // Clean up memory allocated for the thread data
-    free(new_thr);
+
+    close(fd);
 
     // Exit the thread
     pthread_exit(NULL);

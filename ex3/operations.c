@@ -13,7 +13,10 @@
 static struct EventList* event_list = NULL;
 static unsigned int state_access_delay_ms = 0;
 
+pthread_mutex_t create_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t reserve_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t event_list_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 /// Calculates a timespec from a delay in milliseconds.
 /// @param delay_ms Delay in milliseconds.
@@ -67,12 +70,10 @@ int ems_init(unsigned int delay_ms) {
 
 // Function to reset the event list
 void reset_event_list() {
-  pthread_mutex_lock(&event_list_mutex);
   if (event_list != NULL) {
     free_list(event_list);
     event_list = create_list();
   }
-   pthread_mutex_unlock(&event_list_mutex);
 }
 
 int ems_terminate() {
@@ -93,12 +94,12 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
     return 1;
   }
 
-  // Lock the mutex before modifying the shared data
-  pthread_mutex_lock(&event_list_mutex);
+  // Lock the mutex before modifying the shared data for event creation
+  pthread_mutex_lock(&create_mutex);
 
   if (get_event_with_delay(event_id) != NULL) {
     fprintf(stderr, "Event already exists\n");
-    pthread_mutex_unlock(&event_list_mutex);
+    pthread_mutex_unlock(&create_mutex);
     return 1;
   }
 
@@ -154,9 +155,9 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
     return 1;
   }
 
-  unsigned int reservation_id = ++event->reservations;
+   pthread_mutex_lock(&event_list_mutex);
 
-  pthread_mutex_lock(&event_list_mutex);
+  unsigned int reservation_id = ++event->reservations;
 
   size_t i = 0;
   for (; i < num_seats; i++) {
@@ -228,6 +229,7 @@ int ems_show(unsigned int event_id, int fd) {
 
 
 int ems_list_events(int fd) {
+  
   if (event_list == NULL) {
     fprintf(stderr, "EMS state must be initialized\n");
     return 1;
