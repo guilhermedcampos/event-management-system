@@ -109,7 +109,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
 
     int close_out_fd = 1;  // Flag to track if out_fd needs to be closed
     //pthread_mutex_lock(&cycle_mutex);
-    while (get_line_number(fd, lseek(fd, 0, SEEK_CUR)) <= num_lines) {
+    while (1) {
         int x = (get_line_number(fd, lseek(fd, 0, SEEK_CUR)) % max_thr) + 1;
         printf("Current line %d\n", get_line_number(fd, lseek(fd, 0, SEEK_CUR)));
         //printf("File desc %d\n", fd);
@@ -193,6 +193,8 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
 
             case EOC:
                 close_out_fd = 0;  // Flag to track if out_fd needs to be closed
+                close(out_fd);  // Close the output file descriptor
+                close(fd);      // Close the input file descriptor
                 break;
 
             default:
@@ -206,8 +208,6 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
     }
     //pthread_mutex_unlock(&cycle_mutex);
     // Close file descriptors outside the loop
-    close(fd);    // Close input file descriptor
-    close(out_fd); // Close output file descriptor
     fflush(stdout);  // Flush after processing each file
 }
 
@@ -353,6 +353,7 @@ void process_directory(char argv[], int max_proc, int max_threads) {
     // Close the jobs directory
     closedir(dir);
 }
+
 int main(int argc, char *argv[]) {
     unsigned int state_access_delay_ms = STATE_ACCESS_DELAY_MS;
 
