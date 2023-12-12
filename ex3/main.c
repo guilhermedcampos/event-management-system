@@ -126,10 +126,10 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
                     size_t num_rows, num_cols;
                     if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
                         pthread_mutex_unlock(&file_mutex);
+                        pthread_mutex_lock(&ems_mutex);
                         ems_create(event_id, num_rows, num_cols);
-                    } else {
-                    pthread_mutex_unlock(&file_mutex);
-                    }
+                        pthread_mutex_unlock(&ems_mutex);
+                    } 
                     break;
                 }
                 case CMD_RESERVE: {
@@ -150,10 +150,8 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
                     unsigned int event_id;
                     if (parse_show(fd, &event_id) != 0) {
                         fprintf(stderr, "Invalid command. See HELP for usage\n");
-                        pthread_mutex_unlock(&file_mutex);
-                    }else {
-                    pthread_mutex_unlock(&file_mutex);
                     }
+                    pthread_mutex_unlock(&file_mutex);
                     pthread_mutex_lock(&ems_mutex);
                     ems_show(event_id, out_fd);
                     pthread_mutex_unlock(&ems_mutex);
@@ -166,6 +164,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id, int max
                         fprintf(stderr, "Failed to list events\n");
                     }
                     pthread_mutex_unlock(&ems_mutex);
+                    pthread_mutex_unlock(&file_mutex);
                     break;
                 }
 
