@@ -102,6 +102,7 @@ int get_line_number(int fd, off_t offset) {
 // Parses the content of a .jobs file
 void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
                      int max_thr, int num_lines) {
+
     // Construct the output file path
     char out_file_path[PATH_MAX];
     snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", argv,
@@ -114,15 +115,34 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
         return;
     }
 
-    int close_out_fd = 1; // Flag to track if out_fd needs to be closed
+    // Reset the end of file flag
     eof_flag = false;
+
+    // wait command variables
+    unsigned int wait_delay;
+    bool wait_flag[max_thr];
+    for (int i = 0; i < max_thr; i++) {
+        wait_flag[i] = false;
+    }
 
     // Process each command in the file until the end is reached
     while (!eof_flag) {
+
         pthread_mutex_lock(&f_mutex);
+        // Print the current line number
         printf("Thread with id %d reading line %d with command.\n", id,
                get_line_number(fd, lseek(fd, 0, SEEK_CUR)));
+        pthread_mutex_unlock(&f_mutex);
 
+        // See if thread should wait
+        if (wait_flag[id - 1]) {
+            printf("Thread %d waiting %d seconds\n", id, wait_delay / 1000);
+            ems_wait(wait_delay);
+            wait_flag[id - 1] = false;
+            printf("Thread %d finished waiting\n", id);
+        }
+
+        pthread_mutex_lock(&f_mutex);
         // Get the next command from the file
         enum Command cmd = get_next(fd);
         pthread_mutex_unlock(&f_mutex);
@@ -205,12 +225,23 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
         }
         case CMD_WAIT: {
             // Process WAIT command
-            unsigned int delay_ms, thread_id;
+            unsigned int thread_id;
             pthread_mutex_lock(&f_mutex);
 
-            if (parse_wait(fd, &delay_ms, &thread_id) == 1 && thread_id == id) {
-                ems_wait(delay_ms);
-                printf("Waiting\n");
+            int wait_result = parse_wait(fd, &wait_delay, &thread_id);
+            printf("Wait result: %d\n", wait_result);
+            printf("Delay: %d\n", wait_delay);
+
+            if (wait_result == 1) {
+                // only one thread should wait
+                wait_flag[thread_id - 1] = true;
+                printf("Setting wait flag for thread %d.\n", thread_id);
+            } else if (wait_result == 0) {
+                // all threads should wait
+                for (int i = 0; i < max_thr; i++) {
+                    wait_flag[i] = true;
+                }
+                printf("Setting wait flag for all threads.\n");
             }
             pthread_mutex_unlock(&f_mutex);
             break;

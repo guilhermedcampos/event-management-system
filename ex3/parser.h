@@ -16,10 +16,13 @@ enum Command {
   EOC  // End of commands
 };
 
+
 /// Reads a line and returns the corresponding command.
 /// @param fd File descriptor to read from.
 /// @return The command read.
 enum Command get_next(int fd);
+
+static int read_uint2(int fd, unsigned int *value, char *next);
 
 /// Parses a CREATE command.
 /// @param fd File descriptor to read from.
