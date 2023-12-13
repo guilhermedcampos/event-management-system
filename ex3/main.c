@@ -19,8 +19,16 @@ pthread_mutex_t f_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ems_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t outf_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+// Mutex for synchronization of barrier variables
+pthread_mutex_t barrier_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 // Flag to indicate end of file
 bool eof_flag = false;
+
+// flag for barrier command
+bool barrier_reached = false;
+int barrier_line = -1;
+int barrier_count = 0;
 
 // Structure to hold thread-specific data
 struct ThreadData {
@@ -99,6 +107,23 @@ int get_line_number(int fd, off_t offset) {
     return line_number;
 }
 
+void set_line(int fd, int line_number) {
+    char c;
+    int current_line = 1;
+
+    lseek(fd, 0, SEEK_SET); // Move to the beginning of the file
+
+    while (current_line < line_number) {
+        if (read(fd, &c, 1) == 0) {
+            // Break if end of file is reached
+            break;
+        }
+
+        if (c == '\n') {
+            current_line++;
+        }
+    }
+}
 // Parses the content of a .jobs file
 void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
                      int max_thr, int num_lines) {
@@ -121,6 +146,8 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
     // wait command variables
     unsigned int wait_delay;
     bool wait_flag[max_thr];
+
+    // Initialize wait_flag array
     for (int i = 0; i < max_thr; i++) {
         wait_flag[i] = false;
     }
@@ -130,10 +157,29 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
 
         pthread_mutex_lock(&f_mutex);
         // Print the current line number
+        int current_line = get_line_number(fd, lseek(fd, 0, SEEK_CUR));
         printf("Thread with id %d reading line %d with command.\n", id,
-               get_line_number(fd, lseek(fd, 0, SEEK_CUR)));
+               current_line);
         pthread_mutex_unlock(&f_mutex);
 
+        printf("Barrier line: %d\n", barrier_line);
+        printf("Current line: %d\n", current_line);
+
+        if (barrier_reached) {
+            pthread_mutex_lock(
+                &barrier_mutex); // Lock to protect barrier variables
+            if (barrier_line == current_line) {
+                barrier_count++;
+                printf("Thread %d reached barrier\n", id);
+                printf("Barrier count: %d\n", barrier_count);
+                while (barrier_count < max_thr) {
+                    pthread_mutex_unlock(&barrier_mutex);
+                    ems_wait(1000);
+                    printf("Thread %d waiting for barrier\n", id);
+                }
+                barrier_reached = false;
+            }
+        }
         // See if thread should wait
         if (wait_flag[id - 1]) {
             printf("Thread %d waiting %d seconds\n", id, wait_delay / 1000);
@@ -159,11 +205,13 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
 
             // Parse CREATE command parameters
             if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
+                pthread_mutex_unlock(&f_mutex);
                 pthread_mutex_lock(&ems_mutex);
                 ems_create(event_id, num_rows, num_cols);
                 pthread_mutex_unlock(&ems_mutex);
+            } else {
+                pthread_mutex_unlock(&f_mutex);
             }
-            pthread_mutex_unlock(&f_mutex);
             break;
         }
         case CMD_RESERVE: {
@@ -177,14 +225,14 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
             // Parse RESERVE command parameters
             size_t num_coords =
                 parse_reserve(fd, MAX_RESERVATION_SIZE, &event_id, xs, ys);
-
+            pthread_mutex_unlock(&f_mutex);
             if (num_coords > 0) {
                 pthread_mutex_lock(&ems_mutex);
                 ems_reserve(event_id, num_coords, xs, ys);
                 pthread_mutex_unlock(&ems_mutex);
             }
 
-            pthread_mutex_unlock(&f_mutex);
+            printf("Thread %d finished reserving.\n", id);
             break;
         }
         case CMD_SHOW: {
@@ -211,6 +259,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
             pthread_mutex_unlock(&outf_mutex);
             pthread_mutex_unlock(&ems_mutex);
             pthread_mutex_unlock(&f_mutex);
+            printf("Thread %d finished showing.\n", id);
             break;
         }
         case CMD_LIST_EVENTS: {
@@ -221,6 +270,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
             ems_list_events(out_fd);
             pthread_mutex_unlock(&outf_mutex);
             pthread_mutex_unlock(&ems_mutex);
+            printf("Thread %d finished listing.\n", id);
             break;
         }
         case CMD_WAIT: {
@@ -262,7 +312,15 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
                    "  BARRIER\n"                     // Not implemented
                    "  HELP\n");
             break;
-        case CMD_BARRIER: // Not implemented
+        case CMD_BARRIER:
+            pthread_mutex_lock(
+                &barrier_mutex); // Lock to protect barrier variables
+            barrier_reached = true;
+            printf("Barrier line on the cmd: %d\n", barrier_line);
+            // initialize barrier variables
+            barrier_count = 0;
+            barrier_line = current_line + 1;
+            pthread_mutex_unlock(&barrier_mutex);
             break;
         case CMD_EMPTY:
             // Handle EMPTY command
