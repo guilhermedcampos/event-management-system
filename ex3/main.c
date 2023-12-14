@@ -17,19 +17,17 @@
 pthread_mutex_t output_file_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Default value if not specified a maximum number of threads per process
-int max_thr = 1; 
+int max_thr = 1;
 
 // Default value if not specified a maximum number of processes active
 int max_proc = 1;
 
-
 // Structure to hold thread-specific data
 struct ThreadData {
-    int num_lines;            // Number of lines in the file
-    int id;                   // Thread ID
-    int fd;                   // File descriptor
-    char base_name[PATH_MAX]; // Base name of the file
-    char argv[PATH_MAX];      // Path of the directory containing files
+    int num_lines; // Number of lines in the file
+    int id;        // Thread ID
+    int fd;        // File descriptor
+    int out_fd;    // Output file descriptor
 };
 
 // Check if a file name has a given extension.
@@ -97,7 +95,7 @@ int get_line_number(int fd, off_t offset) {
 }
 
 // Function to open the output file
-int open_output_file(const char *base_name, char argv[], int id) {
+int open_output_file(const char *base_name, char argv[]) {
     char out_file_path[PATH_MAX];
     snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", argv,
              base_name);
@@ -109,16 +107,9 @@ int open_output_file(const char *base_name, char argv[], int id) {
 }
 
 // Parses the content of a .jobs file
-void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
-                     int num_lines) {
-
+void parse_jobs_file(int fd, int out_fd, int id, int num_lines) {
     // Open the output file for writing
-    int out_fd = open_output_file(base_name, argv, id);
-
-    if (out_fd == -1) {
-        perror("Error opening output file");
-        return;
-    }
+    // Lock the mutex for the file descriptor (out_fd)
 
     // Reset the end of file flag
     int eof_flag = 0;
@@ -162,18 +153,17 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
             break;
         }
         case CMD_SHOW: {
+            pthread_mutex_lock(&output_file_lock);
             unsigned int event_id;
             if (parse_show(fd, &event_id) != 0) {
                 fprintf(stderr, "Invalid command. See HELP for usage\n");
                 break;
             }
-
-            pthread_mutex_lock(&output_file_lock);
             // Execute ems_show and write to the output file
             if (current_line % max_thr == id - 1) {
                 printf("Thread %d showing on line %d.\n", id, current_line);
                 ems_show(event_id, out_fd);
-                fsync(out_fd);
+                // fsync(out_fd);
                 printf("Thread %d showing on line %d.\n", id, current_line);
             }
             pthread_mutex_unlock(&output_file_lock);
@@ -185,7 +175,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
                 printf("Thread %d listing events on line %d.\n", id,
                        current_line);
                 ems_list_events(out_fd);
-                fsync(out_fd);
+                // fsync(out_fd);
                 printf("Thread %d listing events on line %d.\n", id,
                        current_line);
             }
@@ -218,11 +208,14 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
             }
             break;
         case CMD_HELP:
+            // Lock the mutex for the file descriptor (out_fd)
+            pthread_mutex_lock(&output_file_lock);
             if (current_line % max_thr == id - 1) {
                 printf("Thread %d showing help on line %d.\n", id,
                        current_line);
                 ems_help(out_fd);
             }
+            pthread_mutex_unlock(&output_file_lock);
             break;
         case CMD_BARRIER:
             printf("Thread %d reached barrier.\n", id);
@@ -233,6 +226,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
             break;
         case EOC:
             printf("Thread %d reached end of file.\n", id);
+            // Count threads that reached the end of file
             eof_flag = 1;
             break;
         default:
@@ -242,8 +236,11 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
 
     // Flush after processing each file
     fflush(stdout);
+
     // Close the output file
-    close(out_fd);
+    // Lock the mutex for the file descriptor (out_fd)
+    pthread_mutex_lock(&output_file_lock);
+    pthread_mutex_unlock(&output_file_lock);
 }
 
 // The function constructs the path to the job file, parses the file using
@@ -251,14 +248,8 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
 void *process_file_thread(void *arg) {
     struct ThreadData *thread_data = (struct ThreadData *)arg;
 
-    // Construct the path to the job file
-    char file_path[8197]; // PATH_MAX * 2 (So buffer is large enough)
-    snprintf(file_path, sizeof(file_path), "%s/%s.jobs", thread_data->argv,
-             thread_data->base_name);
-
     // Parse the .jobs file
-    parse_jobs_file(thread_data->fd, thread_data->base_name, thread_data->argv,
-                    thread_data->id,
+    parse_jobs_file(thread_data->fd, thread_data->out_fd, thread_data->id,
                     thread_data->num_lines);
 
     // Exit the thread
@@ -266,7 +257,7 @@ void *process_file_thread(void *arg) {
 }
 
 void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
-                      const char *file_path, char *base_name, char *argv) {
+                      const char *file_path, int out_fd) {
     for (int i = 0; i < max_thr; ++i) {
         // Allocate separate memory for each thread
         // Open the job file
@@ -280,18 +271,17 @@ void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
         thread_list[i].num_lines = numLines(file_path);
         thread_list[i].id = i + 1;
         thread_list[i].fd = fd;
-        snprintf(thread_list[i].base_name, sizeof(thread_list[i].base_name), "%s", base_name);
-        snprintf(thread_list[i].argv, sizeof(thread_list[i].argv), "%s", argv);
+        thread_list[i].out_fd = out_fd;
 
         // Create threads to process the file
-        if (pthread_create(&threads[i], NULL, process_file_thread, (void *)&thread_list[i]) != 0) {
+        if (pthread_create(&threads[i], NULL, process_file_thread,
+                           (void *)&thread_list[i]) != 0) {
             perror("Error creating thread");
             // Handle error as needed
             return;
         }
     }
 }
-
 
 // Function to process all files in a directory
 void process_directory(char argv[]) {
@@ -329,12 +319,18 @@ void process_directory(char argv[]) {
             pid_t pid = fork();
 
             if (pid == 0) { // Child process
+                // Open the output file for writing
+                int out_fd = open_output_file(base_name, argv);
+                if (out_fd == -1) {
+                    perror("Error opening output file");
+                    return;
+                }
                 pthread_t threads[max_thr];
                 // Create a list of threads structures
                 struct ThreadData *thread_list =
                     malloc(max_thr * sizeof(struct ThreadData));
                 // Create thread data and populate it
-                init_thread_list(threads, thread_list, file_path, base_name, argv);
+                init_thread_list(threads, thread_list, file_path, out_fd);
                 // Wait for all threads to finish
                 void *value = 0;
                 int barrier = 0;
@@ -358,6 +354,8 @@ void process_directory(char argv[]) {
                         break;
                     }
                 }
+                close(out_fd);
+                free(thread_list);
 
                 // Exit the child process
                 exit(0);
