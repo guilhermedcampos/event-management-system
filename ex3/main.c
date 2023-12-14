@@ -100,7 +100,7 @@ int open_output_file(const char *base_name, char argv[]) {
              base_name);
 
     int out_fd =
-        open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR, S_IWUSR);
+        open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 
     return out_fd;
 }

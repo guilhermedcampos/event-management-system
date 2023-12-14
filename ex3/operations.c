@@ -164,6 +164,7 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
 
     // Lock the reservation id mutex before modifying the shared data
     pthread_mutex_lock(&reservation_id_lock);
+    
 
     unsigned int reservation_id = ++event->reservations;
 
@@ -173,7 +174,7 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
         size_t col = ys[i];
 
         if (row <= 0 || row > event->rows || col <= 0 || col > event->cols) {
-            // fprintf(stderr, "Invalid seat\n");
+            fprintf(stderr, "Invalid seat\n");
             // Unlock the reservation id mutex after modifying the shared data
             pthread_mutex_unlock(&reservation_id_lock);
             break;
