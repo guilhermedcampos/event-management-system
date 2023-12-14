@@ -24,7 +24,6 @@ int max_proc = 1;
 
 // Structure to hold thread-specific data
 struct ThreadData {
-    int num_lines; // Number of lines in the file
     int id;        // Thread ID
     int fd;        // File descriptor
     int out_fd;    // Output file descriptor
@@ -107,7 +106,7 @@ int open_output_file(const char *base_name, char argv[]) {
 }
 
 // Parses the content of a .jobs file
-void parse_jobs_file(int fd, int out_fd, int id, int num_lines) {
+void parse_jobs_file(int fd, int out_fd, int id) {
     // Open the output file for writing
     // Lock the mutex for the file descriptor (out_fd)
 
@@ -193,7 +192,7 @@ void parse_jobs_file(int fd, int out_fd, int id, int num_lines) {
                 ems_wait(wait_delay);
             } else if (wait_result == 1) {
                 // only one thread should wait
-                if (id_index == id) {
+                if ((int)id_index == id) {
                     printf("Thread %d waiting %d seconds\n", id,
                            wait_delay / 1000);
                     ems_wait(wait_delay);
@@ -234,13 +233,11 @@ void parse_jobs_file(int fd, int out_fd, int id, int num_lines) {
         }
     }
 
+    close(fd);
     // Flush after processing each file
     fflush(stdout);
 
-    // Close the output file
-    // Lock the mutex for the file descriptor (out_fd)
-    pthread_mutex_lock(&output_file_lock);
-    pthread_mutex_unlock(&output_file_lock);
+
 }
 
 // The function constructs the path to the job file, parses the file using
@@ -249,8 +246,7 @@ void *process_file_thread(void *arg) {
     struct ThreadData *thread_data = (struct ThreadData *)arg;
 
     // Parse the .jobs file
-    parse_jobs_file(thread_data->fd, thread_data->out_fd, thread_data->id,
-                    thread_data->num_lines);
+    parse_jobs_file(thread_data->fd, thread_data->out_fd, thread_data->id);
 
     // Exit the thread
     pthread_exit(NULL);
@@ -268,7 +264,6 @@ void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
         }
 
         // Initialize thread data
-        thread_list[i].num_lines = numLines(file_path);
         thread_list[i].id = i + 1;
         thread_list[i].fd = fd;
         thread_list[i].out_fd = out_fd;
@@ -328,7 +323,7 @@ void process_directory(char argv[]) {
                 pthread_t threads[max_thr];
                 // Create a list of threads structures
                 struct ThreadData *thread_list =
-                    malloc(max_thr * sizeof(struct ThreadData));
+                    malloc((long unsigned int)max_thr * sizeof(struct ThreadData));
                 // Create thread data and populate it
                 init_thread_list(threads, thread_list, file_path, out_fd);
                 // Wait for all threads to finish
@@ -356,7 +351,6 @@ void process_directory(char argv[]) {
                 }
                 close(out_fd);
                 free(thread_list);
-
                 // Exit the child process
                 exit(0);
             } else if (pid > 0) {

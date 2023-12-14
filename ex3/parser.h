@@ -22,8 +22,6 @@ enum Command {
 /// @return The command read.
 enum Command get_next(int fd);
 
-static int read_uint2(int fd, unsigned int *value, char *next);
-
 /// Parses a CREATE command.
 /// @param fd File descriptor to read from.
 /// @param event_id Pointer to the variable to store the event ID in.

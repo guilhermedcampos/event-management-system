@@ -6,40 +6,6 @@
 #include <unistd.h>
 
 #include "constants.h"
-static int read_uint2(int fd, unsigned int *value, char *next) {
-    char buf[32]; // Adjust the buffer size as needed
-
-    int i = 0;
-    while (1) {
-        if (read(fd, buf + i, 1) == 0) {
-            *next = '\0';
-            break;
-        }
-
-        *next = buf[i];
-
-        if (buf[i] > '9' || buf[i] < '0') {
-            buf[i] = '\0';
-            break;
-        }
-
-        i++;
-        if (i >= sizeof(buf) - 1) {
-            // Buffer is full; handle this case based on your requirements
-            break;
-        }
-    }
-
-    unsigned long ul = strtoul(buf, NULL, 10);
-
-    if (ul > UINT_MAX) {
-        return 1;
-    }
-
-    *value = (unsigned int)ul;
-
-    return 0;
-}
 
 static int read_uint(int fd, unsigned int *value, char *next) {
     char buf[16];
