@@ -5,7 +5,6 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,12 +16,18 @@
 // Create a lock when writing onto the output file
 pthread_mutex_t output_file_lock = PTHREAD_MUTEX_INITIALIZER;
 
+// Default value if not specified a maximum number of threads per process
+int max_thr = 1; 
+
+// Default value if not specified a maximum number of processes active
+int max_proc = 1;
+
+
 // Structure to hold thread-specific data
 struct ThreadData {
     int num_lines;            // Number of lines in the file
     int id;                   // Thread ID
     int fd;                   // File descriptor
-    int max_thr;              // Maximum number of threads
     char base_name[PATH_MAX]; // Base name of the file
     char argv[PATH_MAX];      // Path of the directory containing files
 };
@@ -105,7 +110,7 @@ int open_output_file(const char *base_name, char argv[], int id) {
 
 // Parses the content of a .jobs file
 void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
-                     int max_thr, int num_lines) {
+                     int num_lines) {
 
     // Open the output file for writing
     int out_fd = open_output_file(base_name, argv, id);
@@ -116,7 +121,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
     }
 
     // Reset the end of file flag
-    bool eof_flag = false;
+    int eof_flag = 0;
 
     int current_line = 0; // Current line number
 
@@ -228,7 +233,7 @@ void parse_jobs_file(int fd, const char *base_name, char argv[], int id,
             break;
         case EOC:
             printf("Thread %d reached end of file.\n", id);
-            eof_flag = true;
+            eof_flag = 1;
             break;
         default:
             break;
@@ -253,7 +258,7 @@ void *process_file_thread(void *arg) {
 
     // Parse the .jobs file
     parse_jobs_file(thread_data->fd, thread_data->base_name, thread_data->argv,
-                    thread_data->id, thread_data->max_thr,
+                    thread_data->id,
                     thread_data->num_lines);
 
     // Exit the thread
@@ -261,8 +266,8 @@ void *process_file_thread(void *arg) {
 }
 
 void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
-                      const char *file_path, int max_threads, char *base_name, char *argv) {
-    for (int i = 0; i < max_threads; ++i) {
+                      const char *file_path, char *base_name, char *argv) {
+    for (int i = 0; i < max_thr; ++i) {
         // Allocate separate memory for each thread
         // Open the job file
         int fd = open(file_path, O_RDONLY);
@@ -274,7 +279,6 @@ void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
         // Initialize thread data
         thread_list[i].num_lines = numLines(file_path);
         thread_list[i].id = i + 1;
-        thread_list[i].max_thr = max_threads;
         thread_list[i].fd = fd;
         snprintf(thread_list[i].base_name, sizeof(thread_list[i].base_name), "%s", base_name);
         snprintf(thread_list[i].argv, sizeof(thread_list[i].argv), "%s", argv);
@@ -290,7 +294,7 @@ void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
 
 
 // Function to process all files in a directory
-void process_directory(char argv[], int max_proc, int max_threads) {
+void process_directory(char argv[]) {
     // Open the directory
     DIR *dir = opendir(argv);
 
@@ -325,17 +329,17 @@ void process_directory(char argv[], int max_proc, int max_threads) {
             pid_t pid = fork();
 
             if (pid == 0) { // Child process
-                pthread_t threads[max_threads];
+                pthread_t threads[max_thr];
                 // Create a list of threads structures
                 struct ThreadData *thread_list =
-                    malloc(max_threads * sizeof(struct ThreadData));
+                    malloc(max_thr * sizeof(struct ThreadData));
                 // Create thread data and populate it
-                init_thread_list(threads, thread_list, file_path, max_threads, base_name, argv);
+                init_thread_list(threads, thread_list, file_path, base_name, argv);
                 // Wait for all threads to finish
                 void *value = 0;
                 int barrier = 0;
                 while (1) {
-                    for (int i = 0; i < max_threads; ++i) {
+                    for (int i = 0; i < max_thr; ++i) {
                         pthread_join(threads[i], &value);
                         if (value == (void *)1) {
                             barrier = 1;
@@ -343,7 +347,7 @@ void process_directory(char argv[], int max_proc, int max_threads) {
                     }
                     if (barrier) {
                         barrier = 0;
-                        for (int i = 0; i < max_threads; ++i) {
+                        for (int i = 0; i < max_thr; ++i) {
                             if (pthread_create(&threads[i], NULL,
                                                process_file_thread,
                                                (void *)&thread_list[i]) != 0) {
@@ -396,7 +400,7 @@ int main(int argc, char *argv[]) {
 
     // Check if the number of arguments is correct
     if (argc != 2 && argc != 4) {
-        fprintf(stderr, "Usage: %s <directory> [number] <max_threads>\n",
+        fprintf(stderr, "Usage: %s <directory> [max_proc] <max_thr>\n",
                 argv[0]);
         return 1;
     }
@@ -405,14 +409,12 @@ int main(int argc, char *argv[]) {
     char *directory = argv[1];
 
     // Declare max_proc outside the if block
-    int max_proc = 1; // Initialize to a default value, or any suitable default
-    int max_threads = 1;
 
     // Check if the optional number argument is provided
     if (argc == 4) {
         char *endptr;
         max_proc = (int)strtoul(argv[2], &endptr, 10);
-        max_threads = (int)strtoul(argv[3], &endptr, 10);
+        max_thr = (int)strtoul(argv[3], &endptr, 10);
     }
 
     if (ems_init(state_access_delay_ms)) {
@@ -421,7 +423,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Process the directory
-    process_directory(directory, max_proc, max_threads);
+    process_directory(directory);
 
     // print status of the directory
     printf("Directory %s processed\n", directory);
