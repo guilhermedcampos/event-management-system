@@ -7,19 +7,15 @@
 #include <time.h>
 #include <unistd.h>
 
+// Create an event id lock
+pthread_mutex_t event_id_lock = PTHREAD_MUTEX_INITIALIZER;
+
+
 // Calculate the maximum number of digits for an unsigned int
 #define UINT_MAX_DIGITS (1 + (CHAR_BIT * sizeof(unsigned int) - 1) / 3 + 1)
 
 static struct EventList *event_list = NULL;
 static unsigned int state_access_delay_ms = 0;
-
-pthread_mutex_t fd_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-// Mutex for event_id
-pthread_mutex_t event_id_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-// Mutex for event_list
-pthread_mutex_t event_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /// Calculates a timespec from a delay in milliseconds.
 /// @param delay_ms Delay in milliseconds.
@@ -77,12 +73,11 @@ int ems_init(unsigned int delay_ms) {
 
 // Function to reset the event list
 void reset_event_list() {
-    pthread_mutex_lock(&event_list_mutex);
+
     if (event_list != NULL) {
         free_list(event_list);
         event_list = create_list();
     }
-    pthread_mutex_unlock(&event_list_mutex);
 }
 
 int ems_terminate() {
@@ -104,14 +99,12 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
         return 1;
     }
 
-    // Lock the mutex before modifying the shared data for event creation
-    pthread_mutex_lock(&event_list_mutex);
-    pthread_mutex_lock(&event_id_mutex);
+    // Lock the event id mutex before modifying the shared data
+    pthread_mutex_lock(&event_id_lock);
 
     if (get_event_with_delay(event_id) != NULL) {
         fprintf(stderr, "Event already exists\n");
-        pthread_mutex_unlock(&event_id_mutex);
-        pthread_mutex_unlock(&event_list_mutex);
+
         return 1;
     }
 
@@ -119,8 +112,7 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
 
     if (event == NULL) {
         fprintf(stderr, "Error allocating memory for event\n");
-        pthread_mutex_unlock(&event_id_mutex);
-        pthread_mutex_unlock(&event_list_mutex);
+
         return 1;
     }
 
@@ -133,8 +125,7 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
     if (event->data == NULL) {
         fprintf(stderr, "Error allocating memory for event data\n");
         free(event);
-        pthread_mutex_unlock(&event_id_mutex);
-        pthread_mutex_unlock(&event_list_mutex);
+
         return 1;
     }
 
@@ -146,14 +137,13 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
         fprintf(stderr, "Error appending event to list\n");
         free(event->data);
         free(event);
-        pthread_mutex_unlock(&event_id_mutex);
-        pthread_mutex_unlock(&event_list_mutex);
+
         return 1;
+        pthread_mutex_unlock(&event_id_lock);
     }
 
-    // Unlock the mutex after modifying the shared data
-    pthread_mutex_unlock(&event_id_mutex);
-    pthread_mutex_unlock(&event_list_mutex);
+    // Unlock the event id mutex after modifying the shared data
+    pthread_mutex_unlock(&event_id_lock);
 
     return 0;
 }
@@ -165,18 +155,12 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
         return 1;
     }
 
-    pthread_mutex_lock(&event_id_mutex);
     struct Event *event = get_event_with_delay(event_id);
-    pthread_mutex_unlock(&event_id_mutex);
 
     if (event == NULL) {
         // printf(stderr, "Event not found\n");
         return 1;
     }
-
-    pthread_mutex_lock(&event_list_mutex);
-
-    pthread_mutex_lock(&fd_mutex);
 
     unsigned int reservation_id = ++event->reservations;
 
@@ -198,9 +182,6 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
         *get_seat_with_delay(event, seat_index(event, row, col)) =
             reservation_id;
     }
-    pthread_mutex_unlock(&fd_mutex);
-
-    pthread_mutex_unlock(&event_list_mutex);
 
     // If the reservation was not successful, free the seats that were reserved.
     if (i < num_seats) {
@@ -219,19 +200,13 @@ int ems_show(unsigned int event_id, int fd) {
         fprintf(stderr, "EMS state must be initialized\n");
         return 1;
     }
-    pthread_mutex_lock(&event_id_mutex);
+
     struct Event *event = get_event_with_delay(event_id);
-    pthread_mutex_unlock(&event_id_mutex);
 
     if (event == NULL) {
         // fprintf(stderr, "Event not found\n");
         return 1;
     }
-
-    // Lock the mutex for the file descriptor (fd)
-    pthread_mutex_lock(&fd_mutex);
-
-    pthread_mutex_lock(&event_list_mutex);
 
     for (size_t i = 1; i <= event->rows; i++) {
         for (size_t j = 1; j <= event->cols; j++) {
@@ -250,10 +225,7 @@ int ems_show(unsigned int event_id, int fd) {
         write(fd, &newline, 1);
     }
 
-    pthread_mutex_unlock(&event_list_mutex);
-
     // Unlock the mutex for the file descriptor (fd)
-    pthread_mutex_unlock(&fd_mutex);
 
     return 0;
 }
@@ -264,17 +236,10 @@ int ems_list_events(int fd) {
         return 1;
     }
 
-    // Lock the mutex for the file descriptor (fd)
-    pthread_mutex_lock(&fd_mutex);
-
-    pthread_mutex_lock(&event_list_mutex);
-
     if (event_list->head == NULL) {
         write(fd, "No events\n", strlen("No events\n"));
         // Unlock the mutex for the file descriptor (fd)
 
-        pthread_mutex_unlock(&event_list_mutex);
-        pthread_mutex_unlock(&fd_mutex);
         return 0;
     }
 
@@ -288,9 +253,6 @@ int ems_list_events(int fd) {
     }
 
     // Unlock the mutex for the file descriptor (fd)
-    pthread_mutex_unlock(&event_list_mutex);
-
-    pthread_mutex_unlock(&fd_mutex);
 
     return 0;
 }
@@ -298,4 +260,20 @@ int ems_list_events(int fd) {
 void ems_wait(unsigned int delay_ms) {
     struct timespec delay = delay_to_timespec(delay_ms);
     nanosleep(&delay, NULL);
+}
+
+int ems_help(int fd) {
+    char *help_str = "Available commands:\n"
+                     "  CREATE <event_id> <num_rows> <num_columns>\n"
+                     "  RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
+                     "  SHOW <event_id>\n"
+                     "  LIST\n"
+                     "  WAIT <delay_ms> [thread_id]\n"
+
+                     "  BARRIER\n"
+                     "  HELP\n";
+
+    write(fd, help_str, strlen(help_str));
+
+    return 0;
 }
