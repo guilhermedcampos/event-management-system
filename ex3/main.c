@@ -260,6 +260,35 @@ void *process_file_thread(void *arg) {
     pthread_exit(NULL);
 }
 
+void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
+                      const char *file_path, int max_threads, char *base_name, char *argv) {
+    for (int i = 0; i < max_threads; ++i) {
+        // Allocate separate memory for each thread
+        // Open the job file
+        int fd = open(file_path, O_RDONLY);
+        if (fd == -1) {
+            perror("Error opening job file");
+            continue;
+        }
+
+        // Initialize thread data
+        thread_list[i].num_lines = numLines(file_path);
+        thread_list[i].id = i + 1;
+        thread_list[i].max_thr = max_threads;
+        thread_list[i].fd = fd;
+        snprintf(thread_list[i].base_name, sizeof(thread_list[i].base_name), "%s", base_name);
+        snprintf(thread_list[i].argv, sizeof(thread_list[i].argv), "%s", argv);
+
+        // Create threads to process the file
+        if (pthread_create(&threads[i], NULL, process_file_thread, (void *)&thread_list[i]) != 0) {
+            perror("Error creating thread");
+            // Handle error as needed
+            return;
+        }
+    }
+}
+
+
 // Function to process all files in a directory
 void process_directory(char argv[], int max_proc, int max_threads) {
     // Open the directory
@@ -301,31 +330,7 @@ void process_directory(char argv[], int max_proc, int max_threads) {
                 struct ThreadData *thread_list =
                     malloc(max_threads * sizeof(struct ThreadData));
                 // Create thread data and populate it
-                for (int i = 0; i < max_threads; ++i) {
-                    // Allocate separate memory for each thread
-                    // Open the job file
-                    int fd = open(file_path, O_RDONLY);
-                    if (fd == -1) {
-                        perror("Error opening job file");
-                        continue;
-                    }
-                    thread_list[i].num_lines = numLines(file_path);
-                    thread_list[i].id = i + 1;
-                    thread_list[i].max_thr = max_threads;
-                    thread_list[i].fd = fd;
-                    snprintf(thread_list[i].base_name,
-                             sizeof(thread_list[i].base_name), "%s", base_name);
-                    snprintf(thread_list[i].argv, sizeof(thread_list[i].argv),
-                             "%s", argv);
-
-                    // Create threads to process the file
-                    if (pthread_create(&threads[i], NULL, process_file_thread,
-                                       (void *)&thread_list[i]) != 0) {
-                        perror("Error creating thread");
-                        return;
-                    }
-                }
-
+                init_thread_list(threads, thread_list, file_path, max_threads, base_name, argv);
                 // Wait for all threads to finish
                 void *value = 0;
                 int barrier = 0;
