@@ -24,9 +24,9 @@ int max_proc = 1;
 
 // Structure to hold thread-specific data
 struct ThreadData {
-    int id;        // Thread ID
-    int fd;        // File descriptor
-    int out_fd;    // Output file descriptor
+    int id;     // Thread ID
+    int fd;     // File descriptor
+    int out_fd; // Output file descriptor
 };
 
 // Check if a file name has a given extension.
@@ -99,8 +99,7 @@ int open_output_file(const char *base_name, char argv[]) {
     snprintf(out_file_path, sizeof(out_file_path), "%s/%s.out", argv,
              base_name);
 
-    int out_fd =
-        open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    int out_fd = open(out_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 
     return out_fd;
 }
@@ -236,8 +235,6 @@ void parse_jobs_file(int fd, int out_fd, int id) {
     close(fd);
     // Flush after processing each file
     fflush(stdout);
-
-
 }
 
 // The function constructs the path to the job file, parses the file using
@@ -322,8 +319,8 @@ void process_directory(char argv[]) {
                 }
                 pthread_t threads[max_thr];
                 // Create a list of threads structures
-                struct ThreadData *thread_list =
-                    malloc((long unsigned int)max_thr * sizeof(struct ThreadData));
+                struct ThreadData *thread_list = malloc(
+                    (long unsigned int)max_thr * sizeof(struct ThreadData));
                 // Create thread data and populate it
                 init_thread_list(threads, thread_list, file_path, out_fd);
                 // Wait for all threads to finish
