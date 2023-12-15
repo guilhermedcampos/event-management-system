@@ -161,8 +161,8 @@ void parse_jobs_file(int fd, int out_fd, int id) {
             if (current_line % max_thr == id - 1) {
                 printf("Thread %d showing on line %d.\n", id, current_line);
                 ems_show(event_id, out_fd);
-                // fsync(out_fd);
-                printf("Thread %d showing on line %d.\n", id, current_line);
+                fsync(out_fd);
+                printf("Thread %d finished showing on line %d.\n", id, current_line);
             }
             pthread_mutex_unlock(&output_file_lock);
             break;
@@ -173,8 +173,8 @@ void parse_jobs_file(int fd, int out_fd, int id) {
                 printf("Thread %d listing events on line %d.\n", id,
                        current_line);
                 ems_list_events(out_fd);
-                // fsync(out_fd);
-                printf("Thread %d listing events on line %d.\n", id,
+                 fsync(out_fd);
+                printf("Thread %d finished listing events on line %d.\n", id,
                        current_line);
             }
             pthread_mutex_unlock(&output_file_lock);
@@ -184,7 +184,9 @@ void parse_jobs_file(int fd, int out_fd, int id) {
             // Process WAIT command
             unsigned int wait_delay;
             unsigned int id_index;
+            pthread_mutex_lock(&output_file_lock);
             int wait_result = parse_wait(fd, &wait_delay, &id_index);
+            pthread_mutex_unlock(&output_file_lock);
             if (wait_result == 0) {
                 printf("Thread %d waiting %d seconds\n", id, wait_delay / 1000);
                 // all threads should wait

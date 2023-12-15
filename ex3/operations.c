@@ -8,10 +8,8 @@
 #include <unistd.h>
 
 // Create an event id lock
-pthread_mutex_t event_id_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t event_lock = PTHREAD_MUTEX_INITIALIZER;
 
-// Create a reservation id lock
-pthread_mutex_t reservation_id_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Calculate the maximum number of digits for an unsigned int
 #define UINT_MAX_DIGITS (1 + (CHAR_BIT * sizeof(unsigned int) - 1) / 3 + 1)
@@ -23,16 +21,16 @@ static unsigned int state_access_delay_ms = 0;
 /// @param delay_ms Delay in milliseconds.
 /// @return Timespec with the given delay.
 static struct timespec delay_to_timespec(unsigned int delay_ms) {
-    return (struct timespec){delay_ms / 1000, (delay_ms % 1000) * 1000000};
+  return (struct timespec){delay_ms / 1000, (delay_ms % 1000) * 1000000};
 }
 
 /// Gets the event with the given ID from the state.
 /// @note Will wait to simulate a real system accessing a costly memory
 /// resource.
-/// @param event_id The ID of the event to get.
+// @param event_id The ID of the event to get.
 /// @return Pointer to the event if found, NULL otherwise.
 static struct Event *get_event_with_delay(unsigned int event_id) {
-    struct timespec delay = delay_to_timespec(state_access_delay_ms);
+   struct timespec delay = delay_to_timespec(state_access_delay_ms);
     nanosleep(&delay, NULL); // Should not be removed
 
     return get_event(event_list, event_id);
@@ -43,12 +41,12 @@ static struct Event *get_event_with_delay(unsigned int event_id) {
 /// resource.
 /// @param event Event to get the seat from.
 /// @param index Index of the seat to get.
-/// @return Pointer to the seat.
+// @return Pointer to the seat.
 static unsigned int *get_seat_with_delay(struct Event *event, size_t index) {
     struct timespec delay = delay_to_timespec(state_access_delay_ms);
     nanosleep(&delay, NULL); // Should not be removed
 
-    return &event->data[index];
+   return &event->data[index];
 }
 
 /// Gets the index of a seat.
@@ -83,6 +81,7 @@ void reset_event_list() {
 }
 
 int ems_terminate() {
+    printf("EMS START\n");
     if (event_list == NULL) {
         fprintf(stderr, "EMS state must be initialized\n");
         return 1;
@@ -90,6 +89,7 @@ int ems_terminate() {
 
     free_list(event_list);
     event_list = NULL; // Set event_list to NULL after freeing
+    printf("EMS FINISH\n");
     return 0;
 }
 
@@ -104,14 +104,14 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
 
         return 1;
     }
-
     // Lock the event id mutex before modifying the shared data
-    pthread_mutex_lock(&event_id_lock);
+    pthread_mutex_lock(&event_lock);
+
     struct Event *event = malloc(sizeof(struct Event));
 
     if (event == NULL) {
         fprintf(stderr, "Error allocating memory for event\n");
-
+        pthread_mutex_unlock(&event_lock);
         return 1;
     }
 
@@ -124,8 +124,7 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
     if (event->data == NULL) {
         fprintf(stderr, "Error allocating memory for event data\n");
         free(event);
-
-        pthread_mutex_unlock(&event_id_lock);
+        pthread_mutex_unlock(&event_lock);
         return 1;
     }
 
@@ -137,13 +136,12 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
         fprintf(stderr, "Error appending event to list\n");
         free(event->data);
         free(event);
-
-        pthread_mutex_unlock(&event_id_lock);
+        pthread_mutex_unlock(&event_lock);
         return 1;
     }
 
     // Unlock the event id mutex after modifying the shared data
-    pthread_mutex_unlock(&event_id_lock);
+    pthread_mutex_unlock(&event_lock);
 
     return 0;
 }
@@ -155,16 +153,16 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
         return 1;
     }
 
+    // Lock the event id mutex before modifying the shared data
+    pthread_mutex_lock(&event_lock);
+
     struct Event *event = get_event_with_delay(event_id);
 
     if (event == NULL) {
         // printf(stderr, "Event not found\n");
+        pthread_mutex_unlock(&event_lock);
         return 1;
     }
-
-    // Lock the reservation id mutex before modifying the shared data
-    pthread_mutex_lock(&reservation_id_lock);
-    
 
     unsigned int reservation_id = ++event->reservations;
 
@@ -174,16 +172,12 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
         size_t col = ys[i];
 
         if (row <= 0 || row > event->rows || col <= 0 || col > event->cols) {
-            fprintf(stderr, "Invalid seat\n");
-            // Unlock the reservation id mutex after modifying the shared data
-            pthread_mutex_unlock(&reservation_id_lock);
+            // fprintf(stderr, "Invalid seat\n");
             break;
         }
 
         if (*get_seat_with_delay(event, seat_index(event, row, col)) != 0) {
             fprintf(stderr, "Seat already reserved\n");
-            // Unlock the reservation id mutex after modifying the shared data
-            pthread_mutex_unlock(&reservation_id_lock);
             break;
         }
 
@@ -191,19 +185,17 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
             reservation_id;
     }
 
+    pthread_mutex_unlock(&event_lock);
+
     // If the reservation was not successful, free the seats that were reserved.
     if (i < num_seats) {
         event->reservations--;
         for (size_t j = 0; j < i; j++) {
             *get_seat_with_delay(event, seat_index(event, xs[j], ys[j])) = 0;
         }
-        // Unlock the reservation id mutex after modifying the shared data
-        pthread_mutex_unlock(&reservation_id_lock);
         return 1;
     }
 
-    // Unlock the reservation id mutex after modifying the shared data
-    pthread_mutex_unlock(&reservation_id_lock);
     return 0;
 }
 
@@ -212,11 +204,11 @@ int ems_show(unsigned int event_id, int fd) {
         fprintf(stderr, "EMS state must be initialized\n");
         return 1;
     }
-
+    
     struct Event *event = get_event_with_delay(event_id);
 
     if (event == NULL) {
-        // fprintf(stderr, "Event not found\n");
+        fprintf(stderr, "Event not found\n");
         return 1;
     }
 
@@ -236,6 +228,8 @@ int ems_show(unsigned int event_id, int fd) {
         char newline = '\n';
         write(fd, &newline, 1);
     }
+
+    // Unlock the mutex for the file descriptor (fd)
 
     return 0;
 }
