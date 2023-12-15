@@ -10,9 +10,6 @@
 // Create a rwlock for event list
 pthread_rwlock_t event_list_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 
-// Calculate the maximum number of digits for an unsigned int
-#define UINT_MAX_DIGITS (1 + (CHAR_BIT * sizeof(unsigned int) - 1) / 3 + 1)
-
 static struct EventList *event_list = NULL;
 static unsigned int state_access_delay_ms = 0;
 
@@ -72,7 +69,6 @@ int ems_init(unsigned int delay_ms) {
 
 // Function to reset the event list
 void reset_event_list() {
-
     if (event_list != NULL) {
         free_list(event_list);
         event_list = create_list();
@@ -85,7 +81,6 @@ int ems_terminate() {
         return 1;
     }
     free_list(event_list);
-    event_list = NULL; // Set event_list to NULL after freeing
     return 0;
 }
 

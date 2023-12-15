@@ -124,13 +124,14 @@ void parse_jobs_file(int fd, int out_fd, int id) {
         case CMD_CREATE: {
             unsigned int event_id;
             size_t num_rows, num_cols;
-
-            // Parse CREATE command parameters
-            if (parse_create(fd, &event_id, &num_rows, &num_cols) == 0) {
-                if (current_line % max_thr == id - 1) {
-                    printf("Thread %d creating on line %d.\n", id,
-                           current_line);
-                    ems_create(event_id, num_rows, num_cols);
+            if (parse_create(fd, &event_id, &num_rows, &num_cols) != 0) {
+                fprintf(stderr, "Invalid command. See HELP for usage\n");
+                continue;
+            }
+            if (current_line % max_thr == id - 1) {
+                // printf("Thread %d creating on line %d.\n", id, current_line);
+                if (ems_create(event_id, num_rows, num_cols)) {
+                    fprintf(stderr, "Failed to create event\n");
                 }
             }
             break;
@@ -141,11 +142,17 @@ void parse_jobs_file(int fd, int out_fd, int id) {
 
             size_t num_coords =
                 parse_reserve(fd, MAX_RESERVATION_SIZE, &event_id, xs, ys);
-            if (num_coords > 0) {
-                if (current_line % max_thr == id - 1) {
-                    printf("Thread %d reserving on line %d.\n", id,
-                           current_line);
-                    ems_reserve(event_id, num_coords, xs, ys);
+
+            if (num_coords == 0) {
+                fprintf(stderr, "Invalid command. See HELP for usage\n");
+                continue;
+            }
+
+            if (current_line % max_thr == id - 1) {
+                // printf("Thread %d reserving on line %d.\n", id,
+                // current_line);
+                if (ems_reserve(event_id, num_coords, xs, ys)) {
+                    fprintf(stderr, "Failed to reserve seats\n");
                 }
             }
             break;
@@ -155,15 +162,13 @@ void parse_jobs_file(int fd, int out_fd, int id) {
             unsigned int event_id;
             if (parse_show(fd, &event_id) != 0) {
                 fprintf(stderr, "Invalid command. See HELP for usage\n");
-                break;
+                continue;
             }
-            // Execute ems_show and write to the output file
             if (current_line % max_thr == id - 1) {
-                printf("Thread %d showing on line %d.\n", id, current_line);
-                ems_show(event_id, out_fd);
-                fsync(out_fd);
-                printf("Thread %d finished showing on line %d.\n", id,
-                       current_line);
+                // printf("Thread %d showing on line %d.\n", id, current_line);
+                if (ems_show(event_id, out_fd)) {
+                    fprintf(stderr, "Failed to show event\n");
+                }
             }
             pthread_mutex_unlock(&output_file_lock);
             break;
@@ -171,39 +176,48 @@ void parse_jobs_file(int fd, int out_fd, int id) {
         case CMD_LIST_EVENTS: {
             pthread_mutex_lock(&output_file_lock);
             if (current_line % max_thr == id - 1) {
-                printf("Thread %d listing events on line %d.\n", id,
-                       current_line);
-                ems_list_events(out_fd);
-                fsync(out_fd);
-                printf("Thread %d finished listing events on line %d.\n", id,
-                       current_line);
+                // printf("Thread %d listing events on line %d.\n", id,
+                // current_line);
+                if (ems_list_events(out_fd)) {
+                    fprintf(stderr, "Failed to list events\n");
+                }
             }
             pthread_mutex_unlock(&output_file_lock);
             break;
         }
         case CMD_WAIT: {
-            // Process WAIT command
+            // Initialize variables
             unsigned int wait_delay;
             unsigned int id_index;
+
+            // Lock the mutex for the file descriptor (out_fd)
             pthread_mutex_lock(&output_file_lock);
+
+            // Parse the wait command
             int wait_result = parse_wait(fd, &wait_delay, &id_index);
+            if (wait_result == -1) {
+                fprintf(stderr, "Invalid command. See HELP for usage\n");
+                continue;
+            }
+
+            // Unlock the mutex for the file descriptor (out_fd)
             pthread_mutex_unlock(&output_file_lock);
+
+            // Handle WAIT command
             if (wait_result == 0) {
-                printf("Thread %d waiting %d seconds\n", id, wait_delay / 1000);
+                printf("Thread %d waiting...\n", id);
                 // all threads should wait
                 ems_wait(wait_delay);
             } else if (wait_result == 1) {
                 // only one thread should wait
                 if ((int)id_index == id) {
-                    printf("Thread %d waiting %d seconds\n", id,
-                           wait_delay / 1000);
+                    printf("Thread %d waiting...\n", id);
                     ems_wait(wait_delay);
                 }
             }
             break;
         }
         case CMD_INVALID:
-            // Handle invalid command
             if (current_line % max_thr == id - 1) {
                 fprintf(stderr, "Invalid command. See HELP for usage\n");
             }
@@ -211,23 +225,25 @@ void parse_jobs_file(int fd, int out_fd, int id) {
         case CMD_HELP:
             // Lock the mutex for the file descriptor (out_fd)
             pthread_mutex_lock(&output_file_lock);
+
             if (current_line % max_thr == id - 1) {
-                printf("Thread %d showing help on line %d.\n", id,
-                       current_line);
+                // printf("Thread %d showing help on line %d.\n", id,
+                // current_line);
                 ems_help(out_fd);
             }
+
+            // Unlock the mutex for the file descriptor (out_fd)
             pthread_mutex_unlock(&output_file_lock);
             break;
         case CMD_BARRIER:
-            printf("Thread %d reached barrier.\n", id);
+            // printf("Thread %d reached barrier.\n", id);
             pthread_exit((void *)1);
             break;
         case CMD_EMPTY:
             // Handle EMPTY command
             break;
         case EOC:
-            printf("Thread %d reached end of file.\n", id);
-            // Count threads that reached the end of file
+            // printf("Thread %d reached end of file.\n", id);
             eof_flag = 1;
             break;
         default:
@@ -235,6 +251,7 @@ void parse_jobs_file(int fd, int out_fd, int id) {
         }
     }
 
+    // Close the file
     close(fd);
     // Flush after processing each file
     fflush(stdout);
@@ -314,6 +331,7 @@ void process_directory(char argv[]) {
             pid_t pid = fork();
 
             if (pid == 0) { // Child process
+                printf("Child process [%d] started\n", getpid());
                 // Open the output file for writing
                 int out_fd = open_output_file(base_name, argv);
                 if (out_fd == -1) {
@@ -352,10 +370,17 @@ void process_directory(char argv[]) {
                 close(out_fd);
                 free(thread_list);
                 // Exit the child process
+                //printf("Child process [%d] finished\n", getpid());
+                int status;
+                wait(&status);
+                printf("Child process [%d] exited with status[%d]\n", getpid(),
+                       WEXITSTATUS(status));
                 exit(0);
             } else if (pid > 0) {
                 // Parent process
                 active_processes++;
+                printf("Parent process [%d] created child process [%d]\n",
+                       getpid(), pid);
 
                 // Wait for child processes to avoid exceeding the maximum
                 // allowed
@@ -364,6 +389,9 @@ void process_directory(char argv[]) {
                     pid_t child_pid = wait(&status);
                     if (child_pid > 0) {
                         active_processes--;
+                        printf("Parent process [%d] waited for child process "
+                               "[%d]\n",
+                               getpid(), child_pid);
                     }
                 }
             } else {
