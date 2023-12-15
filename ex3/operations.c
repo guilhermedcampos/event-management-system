@@ -114,6 +114,7 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
     event->cols = num_cols;
     event->reservations = 0;
     event->data = malloc(num_rows * num_cols * sizeof(unsigned int));
+    
     // Initialize mutexes for each seat
     event->mutexes = malloc(num_rows * num_cols * sizeof(pthread_mutex_t));
     for (size_t i = 0; i < num_rows * num_cols; i++) {

@@ -107,7 +107,6 @@ int open_output_file(const char *base_name, char argv[]) {
 // Parses the content of a .jobs file
 void parse_jobs_file(int fd, int out_fd, int id) {
     // Open the output file for writing
-    // Lock the mutex for the file descriptor (out_fd)
 
     // Reset the end of file flag
     int eof_flag = 0;
@@ -156,6 +155,7 @@ void parse_jobs_file(int fd, int out_fd, int id) {
             break;
         }
         case CMD_SHOW: {
+            // Lock the mutex for the file descriptor (out_fd)
             pthread_mutex_lock(&output_file_lock);
             unsigned int event_id;
             if (parse_show(fd, &event_id) != 0) {
@@ -171,6 +171,7 @@ void parse_jobs_file(int fd, int out_fd, int id) {
             break;
         }
         case CMD_LIST_EVENTS: {
+            // Lock the mutex for the file descriptor (out_fd)
             pthread_mutex_lock(&output_file_lock);
             if (current_line % max_thr == id - 1) {
                 if (ems_list_events(out_fd)) {
@@ -195,16 +196,15 @@ void parse_jobs_file(int fd, int out_fd, int id) {
                 continue;
             }
 
-            // Unlock the mutex for the file descriptor (out_fd)
             pthread_mutex_unlock(&output_file_lock);
 
             // Handle WAIT command
             if (wait_result == 0) {
                 printf("Thread %d waiting...\n", id);
-                // all threads should wait
+                // All threads should wait
                 ems_wait(wait_delay);
             } else if (wait_result == 1) {
-                // only one thread should wait
+                // Only one thread should wait
                 if ((int)id_index == id) {
                     printf("Thread %d waiting...\n", id);
                     ems_wait(wait_delay);
@@ -225,14 +225,12 @@ void parse_jobs_file(int fd, int out_fd, int id) {
                 ems_help(out_fd);
             }
 
-            // Unlock the mutex for the file descriptor (out_fd)
             pthread_mutex_unlock(&output_file_lock);
             break;
         case CMD_BARRIER:
             pthread_exit((void *)1);
             break;
         case CMD_EMPTY:
-            // Handle EMPTY command
             break;
         case EOC:
             eof_flag = 1;
@@ -263,7 +261,6 @@ void *process_file_thread(void *arg) {
 void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
                       const char *file_path, int out_fd) {
     for (int i = 0; i < max_thr; ++i) {
-        // Allocate separate memory for each thread
         // Open the job file
         int fd = open(file_path, O_RDONLY);
         if (fd == -1) {
@@ -280,7 +277,6 @@ void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
         if (pthread_create(&threads[i], NULL, process_file_thread,
                            (void *)&thread_list[i]) != 0) {
             perror("Error creating thread");
-            // Handle error as needed
             return;
         }
     }
@@ -303,7 +299,6 @@ void process_directory(char argv[]) {
     while ((entry = readdir(dir)) != NULL) {
         // Check if the file has a ".jobs" extension
         if (endsWith(entry->d_name, ".jobs")) {
-            printf("Found .jobs file: %s\n", entry->d_name);
 
             // Reset the event list before processing each file
             reset_event_list();
@@ -329,24 +324,31 @@ void process_directory(char argv[]) {
                     perror("Error opening output file");
                     return;
                 }
+
+                // Array to store each thread
                 pthread_t threads[max_thr];
+
                 // Create a list of threads structures
                 struct ThreadData *thread_list = malloc(
                     (long unsigned int)max_thr * sizeof(struct ThreadData));
+
                 // Create thread data and populate it
                 init_thread_list(threads, thread_list, file_path, out_fd);
-                // Wait for all threads to finish
+
                 void *value = 0;
                 int barrier = 0;
+
+                // Barrier synchronization loop
                 while (1) {
                     for (int i = 0; i < max_thr; ++i) {
                         pthread_join(threads[i], &value);
                         if (value == (void *)1) {
-                            barrier = 1;
-                        }
+                            barrier = 1;  // Set the barrier flag when a thread reaches the barrier
+                        } 
                     }
                     if (barrier) {
                         barrier = 0;
+                        // Create a new set of threads to continue processing
                         for (int i = 0; i < max_thr; ++i) {
                             if (pthread_create(&threads[i], NULL,
                                                process_file_thread,
@@ -355,17 +357,19 @@ void process_directory(char argv[]) {
                             }
                         }
                     } else {
-                        break;
+                        break;  // Exit the loop when no barrier is reached
                     }
                 }
+                // Close the output file descriptor
                 close(out_fd);
+
+                // Free allocated memory for thread's data
                 free(thread_list);
-                // Exit the child process
-                // printf("Child process [%d] finished\n", getpid());
                 int status;
                 wait(&status);
                 printf("Child process [%d] exited with status[%d]\n", getpid(),
                        WEXITSTATUS(status));
+                // Exit the child process
                 exit(0);
             } else if (pid > 0) {
                 // Parent process
@@ -386,7 +390,6 @@ void process_directory(char argv[]) {
                     }
                 }
             } else {
-                // Handle fork failure
                 perror("Fork failed");
             }
         }
@@ -411,15 +414,13 @@ int main(int argc, char *argv[]) {
 
     // Check if the number of arguments is correct
     if (argc != 2 && argc != 4) {
-        fprintf(stderr, "Usage: %s <directory> [max_proc] <max_thr>\n",
+        fprintf(stderr, "Usage: %s <directory> [max_proc] [max_thr>]\n",
                 argv[0]);
         return 1;
     }
 
     // Set the directory
     char *directory = argv[1];
-
-    // Declare max_proc outside the if block
 
     // Check if the optional number argument is provided
     if (argc == 4) {
@@ -436,8 +437,6 @@ int main(int argc, char *argv[]) {
     // Process the directory
     process_directory(directory);
 
-    // print status of the directory
-    printf("Directory %s processed\n", directory);
     ems_terminate();
     return 0;
 }
