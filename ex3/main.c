@@ -41,33 +41,6 @@ int endsWith(const char *str, const char *suffix) {
     return strcmp(str + (str_len - suffix_len), suffix) == 0;
 }
 
-// Count the number of lines in a file.
-int numLines(const char *file_path) {
-    int count = 0;
-    char c;
-
-    int fd = open(file_path, O_RDONLY);
-
-    if (fd == -1) {
-        perror("Error opening file");
-        return -1;
-    }
-
-    while (read(fd, &c, 1) > 0) {
-        if (c == '\n') {
-            count++;
-        }
-    }
-
-    close(fd);
-
-    if (count > 0) {
-        count++;
-    }
-
-    return count;
-}
-
 // Get the line number at a given file offset.
 int get_line_number(int fd, off_t offset) {
     char c;
@@ -106,12 +79,12 @@ int open_output_file(const char *base_name, char argv[]) {
 
 // Parses the content of a .jobs file
 void parse_jobs_file(int fd, int out_fd, int id) {
-    // Open the output file for writing
 
     // Reset the end of file flag
     int eof_flag = 0;
 
-    int current_line = 0; // Current line number
+    // Current line number
+    int current_line = 0;
 
     // Process each command in the file until the end is reached
     while (!eof_flag) {
@@ -262,6 +235,7 @@ void *process_file_thread(void *arg) {
 void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
                       const char *file_path, int out_fd) {
     for (int i = 0; i < max_thr; ++i) {
+
         // Open the job file
         int fd = open(file_path, O_RDONLY);
         if (fd == -1) {
@@ -319,6 +293,7 @@ void process_directory(char argv[]) {
 
             if (pid == 0) { // Child process
                 printf("Child process [%d] started\n", getpid());
+
                 // Open the output file for writing
                 int out_fd = open_output_file(base_name, argv);
                 if (out_fd == -1) {
@@ -344,8 +319,9 @@ void process_directory(char argv[]) {
                     for (int i = 0; i < max_thr; ++i) {
                         pthread_join(threads[i], &value);
                         if (value == (void *)1) {
-                            barrier = 1;  // Set the barrier flag when a thread reaches the barrier
-                        } 
+                            barrier = 1; // Set the barrier flag when a thread
+                                         // reaches the barrier
+                        }
                     }
                     if (barrier) {
                         barrier = 0;
@@ -358,7 +334,7 @@ void process_directory(char argv[]) {
                             }
                         }
                     } else {
-                        break;  // Exit the loop when no barrier is reached
+                        break; // Exit the when no barrier is reached
                     }
                 }
                 // Close the output file descriptor
@@ -366,10 +342,13 @@ void process_directory(char argv[]) {
 
                 // Free allocated memory for thread's data
                 free(thread_list);
+
+                // Wait for child processes to finish
                 int status;
                 wait(&status);
                 printf("Child process [%d] exited with status[%d]\n", getpid(),
                        WEXITSTATUS(status));
+                       
                 // Exit the child process
                 exit(0);
             } else if (pid > 0) {
