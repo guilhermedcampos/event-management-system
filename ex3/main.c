@@ -246,9 +246,9 @@ void parse_jobs_file(int fd, int out_fd, int id) {
     fflush(stdout);
 }
 
-// The function constructs the path to the job file, parses the file using
-// parse_jobs_file, and then exits the thread.
+// Parse the file using parse_jobs_file, and then exits the thread.
 void *process_file_thread(void *arg) {
+    // Allocate memory for thread-specific data
     struct ThreadData *thread_data = (struct ThreadData *)arg;
 
     // Parse the .jobs file
@@ -258,6 +258,7 @@ void *process_file_thread(void *arg) {
     pthread_exit(NULL);
 }
 
+// Initialize threads to concurrently process the .jobs file
 void init_thread_list(pthread_t *threads, struct ThreadData *thread_list,
                       const char *file_path, int out_fd) {
     for (int i = 0; i < max_thr; ++i) {
@@ -408,7 +409,6 @@ void process_directory(char argv[]) {
     closedir(dir);
 }
 
-// Main function
 int main(int argc, char *argv[]) {
     unsigned int state_access_delay_ms = STATE_ACCESS_DELAY_MS;
 

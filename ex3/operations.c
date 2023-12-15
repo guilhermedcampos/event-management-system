@@ -114,7 +114,7 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
     event->cols = num_cols;
     event->reservations = 0;
     event->data = malloc(num_rows * num_cols * sizeof(unsigned int));
-    
+
     // Initialize mutexes for each seat
     event->mutexes = malloc(num_rows * num_cols * sizeof(pthread_mutex_t));
     for (size_t i = 0; i < num_rows * num_cols; i++) {
@@ -215,6 +215,7 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
             reservation_id;
     }
     // Lock reservation id lock before reading the shared data
+    // Lock needed to assures a decrement if reservation fails
     pthread_mutex_lock(&reservation_id_lock);
     // If the reservation was not successful, free the seats that were reserved.
     if (i < num_seats) {
