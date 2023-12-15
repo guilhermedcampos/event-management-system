@@ -162,7 +162,8 @@ void parse_jobs_file(int fd, int out_fd, int id) {
                 printf("Thread %d showing on line %d.\n", id, current_line);
                 ems_show(event_id, out_fd);
                 fsync(out_fd);
-                printf("Thread %d finished showing on line %d.\n", id, current_line);
+                printf("Thread %d finished showing on line %d.\n", id,
+                       current_line);
             }
             pthread_mutex_unlock(&output_file_lock);
             break;
@@ -173,7 +174,7 @@ void parse_jobs_file(int fd, int out_fd, int id) {
                 printf("Thread %d listing events on line %d.\n", id,
                        current_line);
                 ems_list_events(out_fd);
-                 fsync(out_fd);
+                fsync(out_fd);
                 printf("Thread %d finished listing events on line %d.\n", id,
                        current_line);
             }
