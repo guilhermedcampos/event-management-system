@@ -129,11 +129,11 @@ void parse_jobs_file(int fd, int out_fd, int id) {
                 continue;
             }
             if (current_line % max_thr == id - 1) {
-                // printf("Thread %d creating on line %d.\n", id, current_line);
                 if (ems_create(event_id, num_rows, num_cols)) {
                     fprintf(stderr, "Failed to create event\n");
                 }
             }
+
             break;
         }
         case CMD_RESERVE: {
@@ -149,8 +149,6 @@ void parse_jobs_file(int fd, int out_fd, int id) {
             }
 
             if (current_line % max_thr == id - 1) {
-                // printf("Thread %d reserving on line %d.\n", id,
-                // current_line);
                 if (ems_reserve(event_id, num_coords, xs, ys)) {
                     fprintf(stderr, "Failed to reserve seats\n");
                 }
@@ -165,7 +163,6 @@ void parse_jobs_file(int fd, int out_fd, int id) {
                 continue;
             }
             if (current_line % max_thr == id - 1) {
-                // printf("Thread %d showing on line %d.\n", id, current_line);
                 if (ems_show(event_id, out_fd)) {
                     fprintf(stderr, "Failed to show event\n");
                 }
@@ -176,8 +173,6 @@ void parse_jobs_file(int fd, int out_fd, int id) {
         case CMD_LIST_EVENTS: {
             pthread_mutex_lock(&output_file_lock);
             if (current_line % max_thr == id - 1) {
-                // printf("Thread %d listing events on line %d.\n", id,
-                // current_line);
                 if (ems_list_events(out_fd)) {
                     fprintf(stderr, "Failed to list events\n");
                 }
@@ -227,8 +222,6 @@ void parse_jobs_file(int fd, int out_fd, int id) {
             pthread_mutex_lock(&output_file_lock);
 
             if (current_line % max_thr == id - 1) {
-                // printf("Thread %d showing help on line %d.\n", id,
-                // current_line);
                 ems_help(out_fd);
             }
 
@@ -236,14 +229,12 @@ void parse_jobs_file(int fd, int out_fd, int id) {
             pthread_mutex_unlock(&output_file_lock);
             break;
         case CMD_BARRIER:
-            // printf("Thread %d reached barrier.\n", id);
             pthread_exit((void *)1);
             break;
         case CMD_EMPTY:
             // Handle EMPTY command
             break;
         case EOC:
-            // printf("Thread %d reached end of file.\n", id);
             eof_flag = 1;
             break;
         default:
@@ -370,7 +361,7 @@ void process_directory(char argv[]) {
                 close(out_fd);
                 free(thread_list);
                 // Exit the child process
-                //printf("Child process [%d] finished\n", getpid());
+                // printf("Child process [%d] finished\n", getpid());
                 int status;
                 wait(&status);
                 printf("Child process [%d] exited with status[%d]\n", getpid(),

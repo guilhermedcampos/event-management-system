@@ -38,8 +38,10 @@ int append_to_list(struct EventList *list, struct Event *event) {
 static void free_event(struct Event *event) {
     if (!event)
         return;
-    // Destroy event mutex
-    pthread_mutex_destroy(&event->mutex);
+    // Destroy seat mutexes
+    for (size_t i = 0; i < event->rows * event->cols; i++) {
+        pthread_mutex_destroy(&event->mutexes[i]);
+    }
     free(event->data);
     free(event);
 }

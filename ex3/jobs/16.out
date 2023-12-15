@@ -81,7 +81,6 @@ Event: 4
 Event: 9
 Event: 8
 Event: 7
-Event: 1
 0 0 0 0 0 0 0 0 0 0 
 0 0 0 0 0 0 0 0 0 0 
 0 0 0 0 0 0 0 0 0 0 
@@ -188,17 +187,17 @@ Event: 1
 0 0 0 0 0 0 0 0 0 0 
 0 0 0 0 0 0 0 0 0 0 
 0 0 0 0 0 0 0 0 0 0 
-0 0 0 0 0 0 0 1 0 0 
-0 0 0 0 0 0 0 0 0 0 
-0 1 0 0 0 0 0 0 0 0 
-0 0 0 0 0 0 0 0 0 0 
-0 0 0 1 0 0 0 0 0 0 
 0 0 0 0 0 0 0 0 0 0 
 0 0 0 0 0 0 0 0 0 0 
 0 0 0 0 0 0 0 0 0 0 
-0 0 0 1 0 0 0 0 0 0 
 0 0 0 0 0 0 0 0 0 0 
-0 0 0 0 1 0 0 0 0 0 
+0 0 0 0 0 0 0 0 0 0 
+0 0 0 0 0 0 0 0 0 0 
+0 0 0 0 0 0 0 0 0 0 
+0 0 0 0 0 0 0 0 0 0 
+0 0 0 0 0 0 0 0 0 0 
+0 0 0 0 0 0 0 0 0 0 
+0 0 0 0 0 0 0 0 0 0 
 0 0 0 0 0 0 0 0 0 0 
 0 0 0 0 0 0 0 0 0 0 
 Event: 4
@@ -212,28 +211,23 @@ Event: 8
 Event: 7
 Event: 1
 Event: 2
-Event: 6
 Event: 4
 Event: 9
 Event: 8
 Event: 7
 Event: 1
 Event: 2
-Event: 6
 Event: 4
 Event: 9
 Event: 8
 Event: 7
 Event: 1
 Event: 2
-Event: 6
+Event: 4
+Event: 9
+Event: 8
+Event: 7
+Event: 1
+Event: 2
 Event: 5
-Event: 4
-Event: 9
-Event: 8
-Event: 7
-Event: 1
-Event: 2
 Event: 6
-Event: 5
-Event: 3

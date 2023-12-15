@@ -10,6 +10,9 @@
 // Create a rwlock for event list
 pthread_rwlock_t event_list_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 
+// Create an reservation id lock
+pthread_mutex_t reservation_id_lock = PTHREAD_MUTEX_INITIALIZER;
+
 static struct EventList *event_list = NULL;
 static unsigned int state_access_delay_ms = 0;
 
@@ -111,6 +114,11 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
     event->cols = num_cols;
     event->reservations = 0;
     event->data = malloc(num_rows * num_cols * sizeof(unsigned int));
+    // Initialize mutexes for each seat
+    event->mutexes = malloc(num_rows * num_cols * sizeof(pthread_mutex_t));
+    for (size_t i = 0; i < num_rows * num_cols; i++) {
+        pthread_mutex_init(&event->mutexes[i], NULL);
+    }
 
     if (event->data == NULL) {
         fprintf(stderr, "Error allocating memory for event data\n");
@@ -155,10 +163,36 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
 
     pthread_rwlock_unlock(&event_list_rwlock);
 
-    // Lock the event mutex before reading the shared data
-    pthread_mutex_lock(&event->mutex);
-
     unsigned int reservation_id = ++event->reservations;
+
+    // Sort the seats by row and column and lock them in that order
+    for (size_t i = 0; i < num_seats; i++) {
+        for (size_t j = i + 1; j < num_seats; j++) {
+            if (xs[i] > xs[j] || (xs[i] == xs[j] && ys[i] > ys[j])) {
+                size_t temp = xs[i];
+                xs[i] = xs[j];
+                xs[j] = temp;
+
+                temp = ys[i];
+                ys[i] = ys[j];
+                ys[j] = temp;
+            }
+        }
+    }
+
+    // Look if any seat is repeated
+    for (size_t i = 0; i < num_seats; i++) {
+        for (size_t j = i + 1; j < num_seats; j++) {
+            if (xs[i] == xs[j] && ys[i] == ys[j]) {
+                return 1;
+            }
+        }
+    }
+
+    // Lock seat mutexes
+    for (size_t i = 0; i < num_seats; i++) {
+        pthread_mutex_lock(&event->mutexes[seat_index(event, xs[i], ys[i])]);
+    }
 
     size_t i = 0;
     for (; i < num_seats; i++) {
@@ -172,23 +206,36 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
 
         if (*get_seat_with_delay(event, seat_index(event, row, col)) != 0) {
             fprintf(stderr, "Seat already reserved\n");
+
             break;
         }
 
         *get_seat_with_delay(event, seat_index(event, row, col)) =
             reservation_id;
     }
-
+    // Lock reservation id lock before reading the shared data
+    pthread_mutex_lock(&reservation_id_lock);
     // If the reservation was not successful, free the seats that were reserved.
     if (i < num_seats) {
         event->reservations--;
         for (size_t j = 0; j < i; j++) {
             *get_seat_with_delay(event, seat_index(event, xs[j], ys[j])) = 0;
         }
-        pthread_mutex_unlock(&event->mutex);
+        // Unlock reservation id lock after reading the shared data
+        pthread_mutex_unlock(&reservation_id_lock);
+        // Unlock seat mutexes
+        for (size_t j = 0; j < num_seats; j++) {
+            pthread_mutex_unlock(
+                &event->mutexes[seat_index(event, xs[j], ys[j])]);
+        }
         return 1;
     }
-    pthread_mutex_unlock(&event->mutex);
+    // Unlock reservation id lock after reading the shared data
+    pthread_mutex_unlock(&reservation_id_lock);
+    // Unlock seat mutexes
+    for (size_t j = 0; j < num_seats; j++) {
+        pthread_mutex_unlock(&event->mutexes[seat_index(event, xs[j], ys[j])]);
+    }
     return 0;
 }
 
@@ -210,8 +257,10 @@ int ems_show(unsigned int event_id, int fd) {
 
     pthread_rwlock_unlock(&event_list_rwlock);
 
-    // Lock the event mutex before reading the shared data
-    pthread_mutex_lock(&event->mutex);
+    // Lock every seat mutex before reading the shared data
+    for (size_t i = 0; i < event->rows * event->cols; i++) {
+        pthread_mutex_lock(&event->mutexes[i]);
+    }
 
     for (size_t i = 1; i <= event->rows; i++) {
         for (size_t j = 1; j <= event->cols; j++) {
@@ -230,8 +279,10 @@ int ems_show(unsigned int event_id, int fd) {
         write(fd, &newline, 1);
     }
 
-    // Unlock the event mutex after reading the shared data
-    pthread_mutex_unlock(&event->mutex);
+    // Unlock the seat mutex after reading the shared data
+    for (size_t i = 0; i < event->rows * event->cols; i++) {
+        pthread_mutex_unlock(&event->mutexes[i]);
+    }
     return 0;
 }
 
