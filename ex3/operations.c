@@ -13,7 +13,9 @@ pthread_rwlock_t event_list_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 // Create an reservation id lock
 pthread_mutex_t reservation_id_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/// Represents an event.
 static struct EventList *event_list = NULL;
+
 static unsigned int state_access_delay_ms = 0;
 
 /// Calculates a timespec from a delay in milliseconds.
@@ -58,6 +60,7 @@ static size_t seat_index(struct Event *event, size_t row, size_t col) {
     return (row - 1) * event->cols + col - 1;
 }
 
+// Initialize the event list
 int ems_init(unsigned int delay_ms) {
     if (event_list != NULL) {
         fprintf(stderr, "EMS state has already been initialized\n");
@@ -78,6 +81,7 @@ void reset_event_list() {
     }
 }
 
+// Terminate the event list
 int ems_terminate() {
     if (event_list == NULL) {
         fprintf(stderr, "EMS state must be initialized\n");
@@ -87,12 +91,14 @@ int ems_terminate() {
     return 0;
 }
 
+// Create an event
 int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
     if (event_list == NULL) {
         fprintf(stderr, "EMS state must be initialized\n");
         return 1;
     }
 
+    // Lock the event list before reading the shared data
     pthread_rwlock_wrlock(&event_list_rwlock);
 
     if (get_event_with_delay(event_id) != NULL) {
@@ -144,6 +150,7 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
     return 0;
 }
 
+// Reserve seats
 int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
                 size_t *ys) {
     if (event_list == NULL) {
@@ -214,17 +221,19 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
         *get_seat_with_delay(event, seat_index(event, row, col)) =
             reservation_id;
     }
-    // Lock reservation id lock before reading the shared data
-    // Lock needed to assures a decrement if reservation fails
+
+    // Lock reservation id lock before reading the shared data, needed to
+    // assure a decrement if reservation fails.
     pthread_mutex_lock(&reservation_id_lock);
+
     // If the reservation was not successful, free the seats that were reserved.
     if (i < num_seats) {
         event->reservations--;
         for (size_t j = 0; j < i; j++) {
             *get_seat_with_delay(event, seat_index(event, xs[j], ys[j])) = 0;
         }
-        // Unlock reservation id lock after reading the shared data
         pthread_mutex_unlock(&reservation_id_lock);
+
         // Unlock seat mutexes
         for (size_t j = 0; j < num_seats; j++) {
             pthread_mutex_unlock(
@@ -232,8 +241,8 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
         }
         return 1;
     }
-    // Unlock reservation id lock after reading the shared data
     pthread_mutex_unlock(&reservation_id_lock);
+
     // Unlock seat mutexes
     for (size_t j = 0; j < num_seats; j++) {
         pthread_mutex_unlock(&event->mutexes[seat_index(event, xs[j], ys[j])]);
@@ -241,6 +250,7 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t *xs,
     return 0;
 }
 
+// Show the event
 int ems_show(unsigned int event_id, int fd) {
     if (event_list == NULL) {
         fprintf(stderr, "EMS state must be initialized\n");
@@ -249,6 +259,7 @@ int ems_show(unsigned int event_id, int fd) {
 
     // Lock the event list before reading the shared data
     pthread_rwlock_rdlock(&event_list_rwlock);
+
     struct Event *event = get_event_with_delay(event_id);
 
     if (event == NULL) {
@@ -288,6 +299,7 @@ int ems_show(unsigned int event_id, int fd) {
     return 0;
 }
 
+// List all events
 int ems_list_events(int fd) {
     if (event_list == NULL) {
         fprintf(stderr, "EMS state must be initialized\n");
@@ -304,7 +316,7 @@ int ems_list_events(int fd) {
 
     struct ListNode *current = event_list->head;
     while (current != NULL) {
-        char buffer[64]; // Adjust the buffer size as needed
+        char buffer[64];
         int length = snprintf(buffer, sizeof(buffer), "Event: %u\n",
                               (current->event)->id);
         write(fd, buffer, (size_t)length);
@@ -314,11 +326,13 @@ int ems_list_events(int fd) {
     return 0;
 }
 
+// Wait for a delay
 void ems_wait(unsigned int delay_ms) {
     struct timespec delay = delay_to_timespec(delay_ms);
     nanosleep(&delay, NULL);
 }
 
+// Print help message
 int ems_help(int fd) {
     char *help_str = "Available commands:\n"
                      "  CREATE <event_id> <num_rows> <num_columns>\n"
