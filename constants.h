@@ -1,2 +1,3 @@
 #define MAX_RESERVATION_SIZE 256
 #define STATE_ACCESS_DELAY_MS 10
+#define PATH_MAX        4096

@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "eventlist.h"
 #include <limits.h>
 #include <pthread.h>
