@@ -61,6 +61,12 @@ The program parses the following commands in the input files:
     
         Display information about available commands.
         HELP
+        
+## Parallelism and Synchronization
+
+One of the key strengths of our Event Management System lies in its efficient parallelism design. We have implemented a parallelized approach by employing Read-Write locks to lock individual seats instead of using a single event lock. This design choice maximizes parallelism by allowing multiple threads to simultaneously read seat information without contention. Each seat acts independently, providing optimal performance in scenarios where operations are mainly read-intensive.
+
+Additionally, we have incorporated an output mutex to prevent multiple threads from concurrently writing to the output file. This ensures data consistency and eliminates race conditions that might occur when multiple commands attempt to write to the output file simultaneously. The output lock guarantees that the output file is modified in a controlled manner, enhancing the reliability of the system.
 
 ## Testing
 
