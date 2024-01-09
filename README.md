@@ -1,7 +1,7 @@
 # Event Management System
 
 This program consists in a Operating Systems project designed to explore **processes**, **multi-threading**, **synchronization**, and **file programming** with **POSIX**. The primary goal is to read inputs from files, produce outputs, and allow the configuration of the number of active processes and threads for each process. Each process reads and writes the output for a specific file.
-The Event Management System provides a foundation for managing events and reservations. It supports commands to create events, reserve seats, show the current state of events, list events, introduce delays, and synchronize threads using barriers.
+The Event Management System provides a foundation for managing events and reservations. It supports commands to create events, reserve seats, show the current state of events, list events, introduce delays, and synchronize threads using barriers. 
 
 ## Prerequisites
 
