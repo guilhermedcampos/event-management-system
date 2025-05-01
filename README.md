@@ -13,7 +13,7 @@ The Event Management System provides a foundation for managing events and reserv
 
  Clone the repository:
  ```
-git clone https://github.com/your-username/ems.git
+git clone https://github.com/guilhermedcampos/event-management-system.git
 ```
 Run make to generate the ems executable and the binary files required.
 ```
